@@ -23,6 +23,7 @@ import {
       [eventSettings]="eventSettings"
     ></ejs-schedule>
   `,
+  styleUrl: './calender.component.scss',
 })
 export class CalenderComponent implements OnInit {
   public selectedDate: Date = new Date();

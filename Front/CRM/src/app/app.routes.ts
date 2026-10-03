@@ -1,45 +1,38 @@
 import { Routes } from '@angular/router';
-import { DashboardComponent } from './pages/dashboard/dashboard.component';
-import { UserComponent } from './pages/user/user.component';
-import { LoginComponent } from './pages/login/login.component';
-import {ForgotPasswordComponent} from "./pages/forgot-password/forgot-password.component";
-import { UserdetailsComponent } from './components/userdetails/userdetails.component';
-import { CandidatesComponent } from './pages/candidates/candidates.component';
-import { authGuard} from './guards/auth/auth.guard';
-import { PipelineComponent } from './pages/pipeline/pipeline.component';
-import { CandidateFormComponent } from './components/candidate-form/candidate-form.component';
-import {CalenderComponent} from "./pages/calender/calender.component";
-import {TaskComponent} from "./pages/task/task.component";
-import {ContactComponent} from "./pages/contact/contact.component";
-import { CandidateDetailComponent } from './pages/candidate-detail/candidate-detail.component';
-import {VenueComponent} from "./pages/venue/venue.component";
-import {TypeComponent} from "./pages/type/type.component";
- import {EventComponent} from "./pages/event/event.component";
- import { UpdateCandidateComponent } from './pages/update-candidate/update-candidate.component';
-import { SelfCreationnComponent } from './pages/self-creationn/self-creationn.component';
+import { authGuard } from './guards/auth/auth.guard';
 
-
+/**
+ * Every route is loaded lazily via `loadComponent` so that its component, its
+ * template and its private dependencies land in a separate chunk instead of the
+ * initial bundle.
+ *
+ * The heavy libraries are isolated this way:
+ *   - @syncfusion/ej2-angular-schedule -> calendar
+ *   - jspdf + html2canvas              -> candidate-detail, update-candidate
+ *   - xlsx                             -> task
+ *   - chart.js                         -> dashboard, task
+ */
 export const routes: Routes = [
-    {path: 'dashboard', component: DashboardComponent,canActivate: [authGuard]},
-    {path: 'users', component: UserComponent,canActivate: [authGuard]},
-    {path: "", component: LoginComponent},
-    {path: 'forget-password', component: ForgotPasswordComponent},
-    {path: "login", component: LoginComponent},
-    {path: "pipeline", component: PipelineComponent,canActivate: [authGuard]},
-    {path: 'users/:id', component: UserdetailsComponent,canActivate: [authGuard] },
-    {path: 'candidates', component: CandidatesComponent,canActivate: [authGuard]},
-    {path: 'candidates/new', component: CandidateFormComponent, canActivate: [authGuard]},
-    {path: "calendar", component:CalenderComponent,canActivate: [authGuard]},
-{path: "event", component:EventComponent,canActivate: [authGuard]},
+  { path: '', loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent) },
+  { path: 'login', loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent) },
+  { path: 'forget-password', loadComponent: () => import('./pages/forgot-password/forgot-password.component').then(m => m.ForgotPasswordComponent) },
+  { path: 'selfCreation', loadComponent: () => import('./pages/self-creationn/self-creationn.component').then(m => m.SelfCreationnComponent) },
 
-  {path: "venue", component:VenueComponent,canActivate: [authGuard]},
- {path: "type", component:TypeComponent,canActivate: [authGuard]},
-  {path: "task", component:TaskComponent,canActivate: [authGuard]},
-  {path:"contact", component:ContactComponent,canActivate:[authGuard]},
-  { path: 'candidate/:id', component: CandidateDetailComponent, canActivate: [authGuard] },
-  { path:"candidate-detail", component:CandidateDetailComponent,canActivate: [authGuard]},
-{ path: 'update-candidate/:id', component: UpdateCandidateComponent, canActivate: [authGuard] },
-{ path: 'selfCreation', component: SelfCreationnComponent}
+  { path: 'dashboard', canActivate: [authGuard], loadComponent: () => import('./pages/dashboard/dashboard.component').then(m => m.DashboardComponent) },
+  { path: 'users', canActivate: [authGuard], loadComponent: () => import('./pages/user/user.component').then(m => m.UserComponent) },
+  { path: 'users/:id', canActivate: [authGuard], loadComponent: () => import('./components/userdetails/userdetails.component').then(m => m.UserdetailsComponent) },
+  { path: 'pipeline', canActivate: [authGuard], loadComponent: () => import('./pages/pipeline/pipeline.component').then(m => m.PipelineComponent) },
+  { path: 'candidates', canActivate: [authGuard], loadComponent: () => import('./pages/candidates/candidates.component').then(m => m.CandidatesComponent) },
+  { path: 'candidates/new', canActivate: [authGuard], loadComponent: () => import('./components/candidate-form/candidate-form.component').then(m => m.CandidateFormComponent) },
+  { path: 'calendar', canActivate: [authGuard], loadComponent: () => import('./pages/calender/calender.component').then(m => m.CalenderComponent) },
+  { path: 'event', canActivate: [authGuard], loadComponent: () => import('./pages/event/event.component').then(m => m.EventComponent) },
+  { path: 'venue', canActivate: [authGuard], loadComponent: () => import('./pages/venue/venue.component').then(m => m.VenueComponent) },
+  { path: 'type', canActivate: [authGuard], loadComponent: () => import('./pages/type/type.component').then(m => m.TypeComponent) },
+  { path: 'task', canActivate: [authGuard], loadComponent: () => import('./pages/task/task.component').then(m => m.TaskComponent) },
+  { path: 'contact', canActivate: [authGuard], loadComponent: () => import('./pages/contact/contact.component').then(m => m.ContactComponent) },
+  { path: 'candidate/:id', canActivate: [authGuard], loadComponent: () => import('./pages/candidate-detail/candidate-detail.component').then(m => m.CandidateDetailComponent) },
+  { path: 'candidate-detail', canActivate: [authGuard], loadComponent: () => import('./pages/candidate-detail/candidate-detail.component').then(m => m.CandidateDetailComponent) },
+  { path: 'update-candidate/:id', canActivate: [authGuard], loadComponent: () => import('./pages/update-candidate/update-candidate.component').then(m => m.UpdateCandidateComponent) },
 
+  { path: '**', redirectTo: '' }
 ];
-
