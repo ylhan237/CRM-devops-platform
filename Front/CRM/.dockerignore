@@ -1,0 +1,37 @@
+# The build context for the frontend image.
+#
+# Without this, `COPY . .` in the Dockerfile ships the host node_modules
+# (577 MB, 41,558 files on this machine) and overwrites the clean `npm ci`
+# result with host-platform binaries, including the Windows esbuild binary,
+# which then fails to execute inside the Linux image.
+
+# Dependencies and build output are produced inside the image
+node_modules
+dist
+.angular
+npm-debug.log*
+yarn-error.log*
+
+# Version control and tooling
+.git
+.gitignore
+.vscode
+.hintrc
+.github
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Documentation and editor files
+README.md
+*.md
+.editorconfig
+.DS_Store
+Thumbs.db
+
+# Test and CI configuration, not needed to produce the bundle
+karma.conf.js
+.eslintrc.json
+eslint.config.js
