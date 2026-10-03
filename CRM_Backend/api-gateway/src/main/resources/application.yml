@@ -35,10 +35,33 @@ spring:
           uri: lb://notification-service
           predicates:
             - Path=/api/notifications/**
+        # The event service exposes four independent resources. Without these
+        # routes the browser reached it directly on port 8089, which only works
+        # on a developer machine: behind nginx or an Ingress the browser cannot
+        # reach that port, and nothing else listens on /api/events.
+        - id: event-service-events
+          uri: lb://event-service
+          predicates:
+            - Path=/api/events/**
+        - id: event-service-venues
+          uri: lb://event-service
+          predicates:
+            - Path=/api/venues/**
+        - id: event-service-event-types
+          uri: lb://event-service
+          predicates:
+            - Path=/api/event-types/**
+        - id: event-service-contacts
+          uri: lb://event-service
+          predicates:
+            - Path=/api/contacts/**
 
       globalcors:
         cors-configurations:
           '[/**]':
+            # A container overrides this through
+            # SPRING_CLOUD_GATEWAY_GLOBALCORS_CORSCONFIGURATIONS_[/**]_ALLOWEDORIGINS,
+            # set in docker-compose.yml from CORS_ALLOWED_ORIGIN.
             allowedOrigins: "http://localhost:4200"
             allowedMethods:
               - GET
