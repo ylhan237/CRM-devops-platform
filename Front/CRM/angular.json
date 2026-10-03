@@ -25,6 +25,11 @@
             ],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
+            "stylePreprocessorOptions": {
+              "includePaths": [
+                "node_modules"
+              ]
+            },
             "assets": [
               {
                 "glob": "**/*",
@@ -50,11 +55,14 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "8kB",
-                  "maximumError": "16kB"
+                  "maximumWarning": "2500kB",
+                  "maximumError": "3MB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "fonts": false
+              }
             },
             "development": {
               "optimization": false,

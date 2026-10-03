@@ -40,6 +40,9 @@ $CRM-theme: mat.define-theme((
 /* You can add global styles to this file, and also import other style files */
 @import "primeng/resources/themes/lara-light-blue/theme.css";
 @import "primeng/resources/primeng.css";
+// Self-hosted Inter via @fontsource/inter. Loading Google Fonts from the CDN
+// at build time made the production build depend on network access, which is
+// fragile both on CI runners and inside Docker.
 @import '@fontsource/inter/300.css'; // Light
 @import '@fontsource/inter/400.css'; // Regular
 @import '@fontsource/inter/500.css'; // Medium
@@ -176,12 +179,3 @@ select:-webkit-autofill {
   transition: 0.3s ease-in-out;
 }
 
-@import '../node_modules/@syncfusion/ej2-base/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-buttons/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-calendars/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-dropdowns/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-inputs/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-lists/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-popups/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-navigations/styles/material.css';
-@import '../node_modules/@syncfusion/ej2-angular-schedule/styles/material.css';
