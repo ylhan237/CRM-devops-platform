@@ -17,19 +17,27 @@
         <mat-icon svgIcon="add" aria-hidden="false" class="add"></mat-icon>
         <p class="inter-regular">Create user</p>
     </button>
+    <!--
+      user is assigned from an HTTP response in ngOnInit, so it is undefined on
+      the first render. Reading user.profilePhoto before that threw
+      "Cannot read properties of undefined (reading 'profilePhoto')" and took the
+      whole view down, including the shell.
+    -->
     <div class="user-profile">
-        <div class="user-image inter-medium">
-            @if (user.profilePhoto!=null) {
-                <img [src]="imageUrl" alt="User Profile">
-            }
-            @else {
-                {{user.firstname[0]}}{{user.lastname[0]}}
-            }
-        </div>
-        <div>
-            <h4 class="username inter-medium">{{user.firstname}} {{user.lastname[0]}}</h4>
-            <p class="email inter-regular">{{user.email}}</p>
-        </div>
+        @if (user) {
+            <div class="user-image inter-medium">
+                @if (user.profilePhoto != null) {
+                    <img [src]="imageUrl" alt="User Profile">
+                }
+                @else {
+                    {{ user.firstname?.[0] }}{{ user.lastname?.[0] }}
+                }
+            </div>
+            <div>
+                <h4 class="username inter-medium">{{ user.firstname }} {{ user.lastname?.[0] }}</h4>
+                <p class="email inter-regular">{{ user.email }}</p>
+            </div>
+        }
         <mat-icon svgIcon="dropdown" aria-hidden="false"></mat-icon>
     </div>
 </header>

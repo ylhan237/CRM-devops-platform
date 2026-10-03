@@ -13,8 +13,12 @@ import { AuthService } from './services/auth/auth.service';
  * wrong under `ng serve`, and the names are no longer reachable now that every
  * route is lazy: `route.component` is undefined for a `loadComponent` route.
  * Matching on the URL is stable in both cases.
+ *
+ * '/' is listed explicitly because the root route is declared as the empty
+ * string in app.routes.ts, but Router.url reports '/' once navigation happened.
+ * Without it the login page rendered with the header and the navbar.
  */
-const FULLSCREEN_ROUTES: readonly string[] = ['', '/login', '/forget-password', '/selfCreation'];
+const FULLSCREEN_ROUTES: readonly string[] = ['', '/', '/login', '/forget-password', '/selfCreation'];
 
 @Component({
   selector: 'app-root',

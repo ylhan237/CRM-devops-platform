@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { provideTestDependencies } from '../../testing/test-dependencies';
 import { CalenderComponent } from './calender.component';
 
 describe('CalenderComponent', () => {
@@ -8,9 +9,9 @@ describe('CalenderComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [CalenderComponent]
-    })
-    .compileComponents();
+      imports: [CalenderComponent],
+      providers: [provideTestDependencies()],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(CalenderComponent);
     component = fixture.componentInstance;

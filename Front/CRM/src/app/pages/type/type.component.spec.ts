@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { provideTestDependencies } from '../../testing/test-dependencies';
 import { TypeComponent } from './type.component';
 
 describe('TypeComponent', () => {
@@ -8,9 +9,9 @@ describe('TypeComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [TypeComponent]
-    })
-    .compileComponents();
+      imports: [TypeComponent],
+      providers: [provideTestDependencies()],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(TypeComponent);
     component = fixture.componentInstance;

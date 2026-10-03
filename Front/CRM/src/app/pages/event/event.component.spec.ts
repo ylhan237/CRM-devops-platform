@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { provideTestDependencies } from '../../testing/test-dependencies';
 import { EventComponent } from './event.component';
 
 describe('EventComponent', () => {
@@ -8,9 +9,9 @@ describe('EventComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [EventComponent]
-    })
-    .compileComponents();
+      imports: [EventComponent],
+      providers: [provideTestDependencies()],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(EventComponent);
     component = fixture.componentInstance;
