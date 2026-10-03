@@ -36,7 +36,18 @@ management:
     sampling:
       probability: 1.0
 
-
-
-# Custom path for uploaded files
+# ─── Outbound HTTP clients ───────────────────────────────────────────────────
+# This service calls the student service, the notification service and the API
+# gateway through RestTemplate. The hosts live here, not in the Java source, so
+# the same jar runs locally and in a container. localhost is correct for a local
+# run; override with the compose service name or the Kubernetes Service name.
+clients:
+  student-service:
+    url: ${STUDENT_SERVICE_URL:http://localhost:8082}
+  notification-service:
+    url: ${NOTIFICATION_SERVICE_URL:http://localhost:8085}
+  api-gateway:
+    url: ${API_GATEWAY_URL:http://localhost:8060}
+  connect-timeout-ms: ${CLIENTS_CONNECT_TIMEOUT_MS:3000}
+  read-timeout-ms: ${CLIENTS_READ_TIMEOUT_MS:10000}
 

@@ -22,9 +22,23 @@ public class TaskService {
     @Autowired
     private RestTemplate restTemplate;
 
-    private static final String NOTIFICATION_SERVICE_URL = "http://localhost:8085/api/notifications/task-assignment";
-    private static final String NOTIFICATION_COMPLETION_URL = "http://localhost:8085/api/notifications/task-completion";
-    private static final String USER_EMAIL_SERVICE_URL = "http://localhost:8060/api/v1/auth/";
+    /**
+     * Base URL of the Notification service.
+     *
+     * Default points at localhost so a local run needs no configuration. Under
+     * Docker this must be the compose service name (notification-service:8085),
+     * and under Kubernetes the Service name, so the value comes from the
+     * environment rather than from the source.
+     */
+    @Value("${clients.notification-service.url:http://localhost:8085}")
+    private String notificationServiceUrl;
+
+    /**
+     * Base URL of the API gateway, which fronts the auth service.
+     * Defaults to localhost for a local run.
+     */
+    @Value("${clients.api-gateway.url:http://localhost:8060}")
+    private String apiGatewayUrl;
 
 
     @Autowired
@@ -65,7 +79,7 @@ public class TaskService {
 
     private String getAssignedToEmail(String assignedTo) {
         // Construct the URL to fetch the email
-        String url = USER_EMAIL_SERVICE_URL + assignedTo + "/email";
+        String url = apiGatewayUrl + "/api/v1/auth/" + assignedTo + "/email";
         return restTemplate.getForObject(url, String.class);
     }
 
@@ -79,7 +93,7 @@ public class TaskService {
                 "Description: " + task.getDescription());
 
         // Send the request to the email service
-        restTemplate.postForObject(NOTIFICATION_SERVICE_URL, emailRequest, String.class);
+        restTemplate.postForObject(notificationServiceUrl + "/api/notifications/task-assignment", emailRequest, String.class);
     }
     private void sendCompletionEmailNotification(Task task) {
         // Prepare the email details
@@ -91,7 +105,7 @@ public class TaskService {
                 "Description: " + task.getDescription());
 
         // Send the request to the email service
-        restTemplate.postForObject(NOTIFICATION_COMPLETION_URL, emailRequest, String.class);
+        restTemplate.postForObject(notificationServiceUrl + "/api/notifications/task-completion", emailRequest, String.class);
     }
 
 

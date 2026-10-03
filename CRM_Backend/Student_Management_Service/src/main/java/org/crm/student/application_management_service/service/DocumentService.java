@@ -5,6 +5,7 @@ import org.crm.student.application_management_service.model.Candidate; // Import
 import org.crm.student.application_management_service.repository.DocumentRepository;
 import org.crm.student.application_management_service.repository.CandidateRepository; // Import the Candidate repository
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,7 +24,16 @@ public class DocumentService {
     @Autowired
     private CandidateRepository candidateRepository; // Inject the CandidateRepository
 
-    private final String uploadDir = "uploads/";
+    /**
+     * Directory receiving uploaded candidate documents.
+     *
+     * Previously hardcoded to "uploads/", which resolves relative to the
+     * process working directory. Inside a container that is /app, so every
+     * upload was lost as soon as the container was recreated. Point this at a
+     * mounted volume instead.
+     */
+    @Value("${upload.dir:uploads}")
+    private String uploadDir;
 
     public Document uploadDocument(Integer candidateId, MultipartFile file, String documentType) throws IOException {
         // Ensure the upload directory exists
@@ -32,12 +42,24 @@ public class DocumentService {
             Files.createDirectories(uploadPath);
         }
 
-        // Define the file path and transfer the file
+        // Keep only the file name. A client-supplied name such as
+        // "../../etc/cron.d/evil" would otherwise resolve outside the upload
+        // directory, and it must not be trusted even when the endpoint is
+        // behind authentication.
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null || originalFilename.isEmpty()) {
             throw new IOException("Invalid file name.");
         }
-        Path filePath = uploadPath.resolve(originalFilename);
+        String safeFilename = Paths.get(originalFilename).getFileName().toString();
+        if (safeFilename.isEmpty() || safeFilename.equals(".") || safeFilename.equals("..")) {
+            throw new IOException("Invalid file name.");
+        }
+
+        Path filePath = uploadPath.resolve(safeFilename).normalize();
+        if (!filePath.startsWith(uploadPath)) {
+            throw new IOException("Invalid file name.");
+        }
+
         file.transferTo(filePath);
 
         // Fetch the candidate from the database
