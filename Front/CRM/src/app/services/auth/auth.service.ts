@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root',
@@ -9,7 +10,7 @@ import { catchError } from 'rxjs/operators';
 })
 export class AuthService {
 
-  private baseUrl = 'http://localhost:8060/api/v1/auth/'; // Corrected backend URL
+  private baseUrl = `${environment.apiBaseUrl}/api/v1/auth/`;
   router: any;
 
   constructor(private http: HttpClient) {}
@@ -69,7 +70,8 @@ private handleError(error: any) {
   }
 
 
-  private apiUrl = 'http://localhost:8060/api/v1/auth/authenticate';
+  // Derived from baseUrl so the two can no longer drift apart.
+  private apiUrl = `${this.baseUrl}authenticate`;
 
   loginUser(credentials: any): Observable<any> {
     return this.http.post(this.apiUrl, credentials);

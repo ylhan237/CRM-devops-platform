@@ -197,7 +197,7 @@
                 <p-fileUpload 
                     name="file"
                     mode="advanced"
-                    url="http://localhost:8060/api/candidates/upload" 
+                    [url]="uploadCsvUrl" 
                     accept=".csv" 
                     [customUpload]="true"
                     [auto]="false"

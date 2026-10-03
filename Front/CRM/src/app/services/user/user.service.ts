@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable, Subject } from 'rxjs';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class UserService {
-  private base_url= 'http://localhost:8060/api/v1/auth';
+  private base_url = `${environment.apiBaseUrl}/api/v1/auth`;
     // Subject to broadcast user creation events
     private userCreatedSource = new Subject<void>();
 

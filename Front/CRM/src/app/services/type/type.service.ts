@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class TypeService {
-  private base_url = 'http://localhost:8089/api/event-types'; // API endpoint defined in the Spring Boot controller
+  private base_url = `${environment.eventBaseUrl}/api/event-types`;
 
   constructor(private http: HttpClient) {}
 

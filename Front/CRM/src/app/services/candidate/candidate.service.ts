@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {Candidate} from "../../models/candidate";
+import { environment } from '../../../environments/environment';
 
 
 @Injectable({
@@ -9,7 +10,7 @@ import {Candidate} from "../../models/candidate";
 })
 export class CandidateService {
 
-  private apiUrl = 'http://localhost:8082/api/candidates';
+  private apiUrl = `${environment.apiBaseUrl}/api/candidates`;
 
   constructor(private http: HttpClient) { }
 
