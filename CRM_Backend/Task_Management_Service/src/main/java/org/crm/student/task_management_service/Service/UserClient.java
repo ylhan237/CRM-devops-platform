@@ -1,5 +1,6 @@
 package org.crm.student.task_management_service.Service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -8,13 +9,20 @@ public class UserClient {
 
     private final RestTemplate restTemplate;
 
+    /**
+     * Base URL of the API gateway, which fronts the auth service. Defaults to
+     * localhost for a local run; override it with the compose service name or
+     * the Kubernetes Service name so the call leaves the container.
+     */
+    @Value("${clients.api-gateway.url:http://localhost:8060}")
+    private String apiGatewayUrl;
 
     public UserClient(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
 
     public boolean validateUser(String username) {
-        String url = "http://localhost:8060/api/v1/auth/" + username + "/exists";
+        String url = apiGatewayUrl + "/api/v1/auth/" + username + "/exists";
         try {
             return restTemplate.getForObject(url, Boolean.class);
         } catch (Exception e) {

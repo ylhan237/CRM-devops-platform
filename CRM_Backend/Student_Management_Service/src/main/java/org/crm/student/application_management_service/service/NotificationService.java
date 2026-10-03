@@ -3,14 +3,21 @@ package org.crm.student.application_management_service.service;
 import org.crm.student.application_management_service.email.EmailNotificationRequest;
 import org.crm.student.application_management_service.email.SmsNotificationRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
 public class NotificationService {
 
-    private static final String EMAIL_NOTIFICATION_URL = "http://localhost:8085/api/notifications/email";
-    private static final String SMS_NOTIFICATION_URL = "http://localhost:8085/api/notifications/sms";
+    /**
+     * Base URL of the Notification service. Defaults to localhost for a local
+     * run; override with the compose service name or the Kubernetes Service name
+     * so the call does not resolve back to this container.
+     */
+    @Value("${clients.notification-service.url:http://localhost:8085}")
+    private String notificationServiceUrl;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -20,8 +27,13 @@ public class NotificationService {
         emailRequest.setTo(email);
         emailRequest.setSubject(subject);
 
-        // Call the Notification service's email API
-        restTemplate.postForObject(EMAIL_NOTIFICATION_URL + "?candidateName=" + candidateName, emailRequest, String.class);
+        String url = UriComponentsBuilder
+                .fromHttpUrl(notificationServiceUrl + "/api/notifications/email")
+                .queryParam("candidateName", candidateName)
+                .build()
+                .toUriString();
+
+        restTemplate.postForObject(url, emailRequest, String.class);
     }
 
     public void sendSmsNotification(String phoneNumber, String message) {
@@ -29,8 +41,6 @@ public class NotificationService {
         smsRequest.setPhoneNumber(phoneNumber);
         smsRequest.setMessage(message);
 
-        // Call the Notification service's SMS API
-        restTemplate.postForObject(SMS_NOTIFICATION_URL, smsRequest, String.class);
+        restTemplate.postForObject(notificationServiceUrl + "/api/notifications/sms", smsRequest, String.class);
     }
 }
-
