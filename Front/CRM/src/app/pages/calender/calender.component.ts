@@ -1,6 +1,5 @@
 import { Component, OnInit } from '@angular/core';
 import { ScheduleModule } from '@syncfusion/ej2-angular-schedule';
-import { HttpClient } from '@angular/common/http';
 import {
   EventSettingsModel,
   DayService,
@@ -9,6 +8,7 @@ import {
   MonthService,
   AgendaService,
 } from '@syncfusion/ej2-angular-schedule';
+import { EventService } from '../../services/event/event.service';
 
 @Component({
   selector: 'app-root',
@@ -29,24 +29,27 @@ export class CalenderComponent implements OnInit {
   public selectedDate: Date = new Date();
   public eventSettings: EventSettingsModel = { dataSource: [] };
 
-  constructor(private http: HttpClient) {}
+  constructor(private eventService: EventService) {}
 
   ngOnInit(): void {
     this.fetchEvents();
   }
 
   fetchEvents(): void {
-    this.http.get('http://localhost:8089/api/events').subscribe(
-      (data: any) => {
+    // Goes through EventService rather than calling HttpClient directly, so the
+    // base URL stays defined in one place. The previous inline
+    // http.get('http://localhost:8089/api/events') was the last hardcoded URL
+    // left in the application and pointed at the browser's own machine.
+    this.eventService.getAllEvents().subscribe(
+      (data: any[]) => {
         this.eventSettings = {
-          dataSource: data.map((event: any) => ({
+          dataSource: (data ?? []).map((event: any) => ({
             Id: event.id,
             Subject: event.name,
             StartTime: new Date(`${event.start}T${event.start_time}`),
             EndTime: new Date(`${event.end}T${event.end_time}`),
           })),
         };
-
       },
       () => {}
     );

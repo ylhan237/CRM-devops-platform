@@ -8,6 +8,7 @@ import { FileUploadModule } from 'primeng/fileupload';
 import { MenuItem, MessageService } from 'primeng/api';
 import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { CandidateServiceService } from '../../services/candidate/candidate-service.service';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-candidate-form',
@@ -39,6 +40,13 @@ export class CandidateFormComponent implements AfterViewInit{
   uploadedFiles: any[] = [];
   file: any = null;
   candidateId: any = null;
+
+  /**
+   * CSV import endpoint. Bound from the template through [url], because a
+   * template cannot import the environment file, and a literal absolute URL
+   * here would make the browser call its own machine.
+   */
+  uploadCsvUrl = `${environment.apiBaseUrl}/api/candidates/upload`;
   breadcrumbItems: MenuItem[] = [
     { label: 'Candidates', routerLink: '/candidates' },
     { label: `Create`, routerLink: `/candidates/new` }
@@ -256,7 +264,7 @@ export class CandidateFormComponent implements AfterViewInit{
 
   onUpload(event: { files: File[] }): void  {
     this.file = event.files[0];
-    const uploadUrl = "http://localhost:8060/api/candidates/upload";
+    const uploadUrl = this.uploadCsvUrl;
     const f = event.files[0]; // Assuming a single file
     const formData = new FormData();
     formData.append('file', f, f.name);
@@ -283,7 +291,7 @@ export class CandidateFormComponent implements AfterViewInit{
     this.uploadedFiles.push(...event.files);
 
     if(this.candidateId){
-      const uploadUrl = `http://localhost:8060/api/candidates/${this.candidateId}/documents`;
+      const uploadUrl = `${environment.apiBaseUrl}/api/candidates/${this.candidateId}/documents`;
 
       this.uploadedFiles.forEach(element => {
         const formData = new FormData();
