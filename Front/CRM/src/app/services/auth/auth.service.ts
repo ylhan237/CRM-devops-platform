@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
@@ -11,9 +12,8 @@ import { environment } from '../../../environments/environment';
 export class AuthService {
 
   private baseUrl = `${environment.apiBaseUrl}/api/v1/auth/`;
-  router: any;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private router: Router) {}
 
 // Method to handle errors
 private handleError(error: any) {
@@ -91,19 +91,30 @@ private handleError(error: any) {
   }
 
   logout(): void {
-          localStorage.removeItem('jwtToken');
+    // The token has to be read before it is removed. The previous order
+    // removed it first, so getToken() always answered null, the branch that
+    // called the backend was unreachable, and the token was never expired
+    // server side: AuthenticationService.logout marks it as expired, so a
+    // token kept working until it expired on its own.
     const token = this.getToken();
-    if (token) {
-      this.http.post(`${this.baseUrl}logout`, { token }).subscribe(
-        () => {
-          localStorage.removeItem('jwtToken');
-          this.router.navigate(['/login']);
-        },
-        () => {}
-      );
-    } else {
+    localStorage.removeItem('jwtToken');
+
+    if (!token) {
       this.router.navigate(['/login']);
+      return;
     }
+
+    // POST /auth/logout takes the token from the Authorization header, it has no
+    // request body. Sending { token } came back as 401 "Authorization token is
+    // required", which the old error handler swallowed.
+    this.http
+      .post(`${this.baseUrl}logout`, null, { headers: { Authorization: `Bearer ${token}` } })
+      .subscribe(
+        () => this.router.navigate(['/login']),
+        // The token is already gone locally either way, so the user still has to
+        // land on the login page when the call fails.
+        () => this.router.navigate(['/login'])
+      );
   }
 
 
