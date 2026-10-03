@@ -1,5 +1,7 @@
 package com.crm.authservice.auth_api1.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -41,6 +43,20 @@ public class User implements UserDetails, Principal {
     private LocalDate dateOfBirth;
     @Column(unique = true)
     private String email;
+
+    /**
+     * BCrypt hash of the password.
+     *
+     * WRITE_ONLY, not IGNORE. The entity is used as a request body by
+     * PUT /auth/update-user/{id}, so the value has to stay readable from JSON,
+     * but it must never be written back: this entity is returned as-is by
+     * /all-users, /user/{id}, /user-info and /email/{email}, and the endpoints
+     * do not build a dedicated response type.
+     *
+     * @JsonIgnore would also silence the setter, which would silently break
+     * every password change.
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     @OneToOne(mappedBy = "user")
@@ -51,8 +67,14 @@ public class User implements UserDetails, Principal {
     private boolean enabled;
     @ManyToMany(fetch = EAGER)
     private List<Role> roles;
+
+    /**
+     * Self reference. Serializing it recurses, since each nested User exposes
+     * another one.
+     */
     @ManyToOne(cascade = CascadeType.REMOVE)
     @JoinColumn(name = "user_id")
+    @JsonIgnore
     private User user;
 
 
@@ -65,9 +87,16 @@ public class User implements UserDetails, Principal {
     @Column(insertable = false)
     private LocalDateTime lastModifiedDate;
 
+    /**
+     * Single-use token emailed to reset a forgotten password. Exposing it
+     * would hand an attacker a working credential reset for any account.
+     */
+    @JsonIgnore
     @Column(name = "password_reset_token")
     private String passwordResetToken;
 
+    /** Server-side bookkeeping, never part of the API contract. */
+    @JsonIgnore
     @Column(name = "token_expiration_time")
     private LocalDateTime tokenExpirationTime;
 
