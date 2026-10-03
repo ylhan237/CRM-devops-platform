@@ -12,7 +12,7 @@
                 <img [src]="previewUrl" alt="Preview">
               }
               @else {
-                {{user.firstname[0]}}{{user.lastname[0]}}
+                {{ user?.firstname?.[0] }}{{ user?.lastname?.[0] }}
               }
               <div class="camera-icon" (click)="triggerFileInput()">
                 <mat-icon svgIcon="camera" aria-hidden="false" class="camera"></mat-icon>
@@ -116,7 +116,7 @@
       <div class="col-md-8">
         <div class="card card-user">
           <div class="card-header">
-            <h5 class="card-title">{{user.firstname}} {{user.lastname}}</h5>
+            <h5 class="card-title">{{ user?.firstname }} {{ user?.lastname }}</h5>
           </div>
           <div class="card-body">
             <form [formGroup]="profileForm" (ngSubmit)="onSubmit()">
