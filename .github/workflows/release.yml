@@ -1,0 +1,246 @@
+# Publication pipeline: images on a tag, or on demand.
+#
+# Triggered by a vX.Y.Z tag as note.md 4.2 describes, plus workflow_dispatch so a
+# release can be produced without creating a tag first.
+#
+# GHCR is the primary registry and ACR is a mirror of it. The mirror is
+# optional: if the Azure secrets are not configured the job says so and the
+# release still succeeds, because GHCR is where the images actually live and
+# failing a release over an unconfigured mirror would help nobody.
+#
+# The two stages are separate on purpose. Build pushes to GHCR and hands the
+# tag list to a scan job, and only a scanned image is mirrored to ACR. That way
+# a vulnerability is found before the image exists in two places.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v0.1.0. Leave empty to derive one from the commit.'
+        required: false
+        type: string
+
+env:
+  REGISTRY_GHCR: ghcr.io
+  REGISTRY_ACR: ${{ secrets.AZURE_REGISTRY }}
+  PLATFORMS: linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+  # Needed to push to GHCR and to read the pushed images back for scanning.
+  packages: write
+  # Needed to attach the Trivy findings to the repository, which is what puts
+  # them in the Security tab. Without it the upload step fails.
+  security-events: write
+
+jobs:
+  build:
+    name: build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One image at a time per runner. The seven services are independent, and
+      # a failure names the service that failed rather than one number for all.
+      fail-fast: false
+      matrix:
+        include:
+          - image: service-discovery
+            context: ./CRM_Backend
+            dockerfile: service-discovery/Dockerfile
+          - image: auth-service
+            context: ./CRM_Backend
+            dockerfile: auth-service/Dockerfile
+          - image: student-service
+            context: ./CRM_Backend
+            dockerfile: Student_Management_Service/Dockerfile
+          - image: task-service
+            context: ./CRM_Backend
+            dockerfile: Task_Management_Service/Dockerfile
+          - image: notification-service
+            context: ./CRM_Backend
+            dockerfile: Notification_Service/Dockerfile
+          - image: event-service
+            context: ./CRM_Backend
+            dockerfile: Event_Management_System/Dockerfile
+          - image: api-gateway
+            context: ./CRM_Backend
+            dockerfile: api-gateway/Dockerfile
+          - image: frontend
+            context: ./Front/CRM
+            dockerfile: Dockerfile
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Needed so a build for arm64 can run. The Java compilation itself is not
+      # emulated: every Dockerfile pins its build stage to $BUILDPLATFORM and
+      # only the runtime stage to $TARGETPLATFORM, so Maven runs natively on the
+      # runner and only a COPY crosses architectures.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}
+          # The tag that was pushed, so a release tag produces that exact tag.
+          # workflow_dispatch without a tag falls back to the short sha.
+          tags: |
+            type=raw,value=${{ inputs.tag || github.ref_name }},enable=${{ inputs.tag || startsWith(github.ref, 'refs/tags/') }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ env.PLATFORMS }}
+          # Labels first, then the build. Two layers so the manifest list is
+          # pushed once rather than rebuilt per platform.
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.tag || github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Record the published tags
+        id: publish
+        run: echo "tags=${{ steps.meta.outputs.tags }}" >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: scan and inventory ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [service-discovery, auth-service, student-service, task-service, notification-service, event-service, api-gateway, frontend]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Only to resolve the same tag expression the build job resolved.
+          persist-credentials: false
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ inputs.tag || github.ref_name }},enable=${{ inputs.tag || startsWith(github.ref, 'refs/tags/') }}
+            type=sha,prefix=sha-
+
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag || github.ref_name }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH
+        # The scan reports; it does not block. Trivy's findings on a base image
+        # that nobody has patched yet are not a reason to refuse a release, and a
+        # gate that blocks on the first finding is one that gets disabled. The
+        # results are uploaded and read.
+        continue-on-error: true
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+        continue-on-error: true
+
+      - name: Software bill of materials
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag || github.ref_name }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  mirror:
+    name: mirror to Azure Container Registry
+    runs-on: ubuntu-latest
+    needs: [build, scan]
+    steps:
+      # Optional by decision: GHCR is the primary and the release is complete
+      # without this. The three secrets are AZURE_REGISTRY, AZURE_REGISTRY_USER
+      # NAME and AZURE_REGISTRY_PASSWORD; until they are set the job exits
+      # successfully having done nothing.
+      - name: Are the Azure credentials configured
+        id: acr
+        env:
+          AZURE_REGISTRY: ${{ secrets.AZURE_REGISTRY }}
+          AZURE_REGISTRY_USERNAME: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          AZURE_REGISTRY_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+        run: |
+          if [ -n "$AZURE_REGISTRY" ] && [ -n "$AZURE_REGISTRY_USERNAME" ] && [ -n "$AZURE_REGISTRY_PASSWORD" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Azure Container Registry credentials are absent, skipping the mirror. GHCR already holds the release."
+          fi
+
+      - name: Publish to ACR
+        if: steps.acr.outputs.configured == 'true'
+        env:
+          ACR: ${{ secrets.AZURE_REGISTRY }}
+          ACR_USER: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "$ACR_PASSWORD" | docker login "$ACR" -u "$ACR_USER" --password-stdin
+
+          for image in service-discovery auth-service student-service task-service \
+                      notification-service event-service api-gateway frontend; do
+            source="ghcr.io/$OWNER/$image:$RELEASE_TAG"
+            # Pull every architecture and push every architecture, so the mirror
+            # is a manifest list too and not a single amd64 image wearing the
+            # same tag.
+            docker buildx imagetools create \
+              --tag "$ACR/$image:$RELEASE_TAG" \
+              "$source"
+            echo "mirrored $image"
+          done
+
+      - name: Confirm the mirror
+        if: steps.acr.outputs.configured == 'true'
+        env:
+          ACR: ${{ secrets.AZURE_REGISTRY }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          for image in service-discovery auth-service student-service task-service \
+                      notification-service event-service api-gateway frontend; do
+            found=$(docker buildx imagetools inspect "$ACR/$image:$RELEASE_TAG" 2>/dev/null \
+                    | grep -c "$OWNER/$image" || true)
+            echo "$image : $found platform entries"
+            if [ "$found" -eq 0 ]; then
+              echo "::error::$image is missing from the Azure registry"
+              exit 1
+            fi
+          done
