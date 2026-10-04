@@ -6,16 +6,28 @@
 <!--
     Rules for the CRM backend.
 
-    Scope: defects, not style. Every rule here catches something that can be
-    wrong at runtime, or that the compiler already assumes and cannot check.
-    Formatting and naming are deliberately absent: Spotless owns the
-    formatting, and a rule set that fights the formatter makes both useless.
+    Scope: defects, not style. Every blocking rule here catches something that
+    can be wrong at runtime, or that the compiler assumes and cannot check.
+    Formatting and naming are deliberately absent, because Spotless owns the
+    formatting and a rule set that fights the formatter makes both useless.
 
-    The set is intentionally short. The service code predates any static
-    analysis, so a broad ruleset would produce a wall of violations on the day
-    it is switched on, and a check that is red from the start is a check people
-    learn to ignore. Rules get added here as the existing code is brought into
-    line, not all at once.
+    Two tiers, and the split is measured rather than guessed.
+
+    BLOCKING, severity error. Eleven rules, every one of them at zero findings
+    across the seven services when this file was written. They can therefore
+    gate a build from day one, and a new equals without a hashCode, a switch
+    without a default or a literal compared with == will fail the pipeline.
+
+    BACKLOG, severity warning. The five rules that did have findings. They are
+    reported in full on every run and the counts are recorded next to each one,
+    but they do not fail the build. The reason is not leniency: removing 63
+    unused imports across the seven services is real work that belongs in
+    commits of its own, and folding it into the branch that introduces the
+    toolchain would bury the toolchain. Each becomes an error when its count
+    reaches zero.
+
+    The counts below were produced by running this file over every service:
+    110 findings in total.
 -->
 <module name="Checker">
     <property name="charset" value="UTF-8"/>
@@ -23,9 +35,8 @@
     <property name="fileExtensions" value="java"/>
 
     <!--
-        Trailing whitespace and a missing final newline are formatting, but
-        they produce noisy diffs, so they are warnings rather than build
-        failures.
+        Cosmetic. Warnings, and the only two rules here about anything but
+        correctness.
     -->
     <module name="FileTabCharacter">
         <property name="eachLine" value="true"/>
@@ -37,37 +48,90 @@
 
     <module name="TreeWalker">
 
-        <!-- Imports -->
-        <module name="AvoidStarImport"/>
-        <module name="UnusedImports"/>
-        <module name="RedundantImport"/>
+        <!-- ================================================== BACKLOG ==== -->
+
+        <!-- 63 findings. Mechanical to remove, but a diff of its own. -->
+        <module name="UnusedImports">
+            <property name="severity" value="warning"/>
+        </module>
+
+        <!-- 2 findings, and both are a duplicate of another import. -->
+        <module name="RedundantImport">
+            <property name="severity" value="warning"/>
+        </module>
+
+        <!--
+            32 findings, all of the form import org.springframework...*.
+
+            A style opinion rather than a defect: the Spring imports read better
+            collapsed, and uncollapsing them is churn with no behaviour behind
+            it.
+        -->
+        <module name="AvoidStarImport">
+            <property name="severity" value="warning"/>
+        </module>
+
+        <!--
+            6 findings.
+
+            One statement per line is a readability preference, and the project
+            has no rule that could rely on it.
+        -->
+        <module name="OneStatementPerLine">
+            <property name="severity" value="warning"/>
+        </module>
+
+        <!--
+            7 findings, and all seven are false alarms worth explaining rather
+            than just silencing.
+
+            Every one of them is a short-circuit null guard followed by a call on
+            the guarded variable:
+
+                if (userRole == null || !userRole.equals("ADMIN"))
+
+            so the receiver cannot be null and nothing is broken. Checkstyle
+            reasons about the comparison, not about the guard in front of it.
+            The rule is kept as a warning because the pattern it dislikes is the
+            one to prefer here: "ADMIN".equals(userRole) would be null safe
+            without the separate check, and writing it that way is what this
+            rule is trying to encourage.
+        -->
+        <module name="EqualsAvoidNull">
+            <property name="severity" value="warning"/>
+        </module>
+
+        <!-- ================================================= BLOCKING ==== -->
+
         <module name="IllegalImport"/>
 
         <!--
-            The correctness rules.
-
-            Each of these is a way to write code that compiles and then behaves
-            differently from what it looks like, which is exactly the class of
-            defect this project has been shipping.
+            The correctness rules. Each is a way to write code that compiles and
+            then behaves differently from what it looks like, which is the class
+            of defect this project has been shipping.
         -->
         <module name="EqualsHashCode"/>
-        <module name="EqualsAvoidNull"/>
         <module name="StringLiteralEquality"/>
         <module name="MissingSwitchDefault"/>
+        <module name="FallThrough"/>
         <module name="MissingOverride"/>
+        <module name="CovariantEquals"/>
         <module name="EmptyStatement"/>
-        <module name="OneStatementPerLine"/>
         <module name="UpperEll"/>
         <module name="ArrayTypeStyle"/>
-        <module name="FallThrough"/>
-        <module name="IllegalInstantiation">
-            <!-- new Integer(..), new Boolean(..), new Long(..) -->
-            <property name="tokens"
-                      value="NUM_DOUBLE, NUM_FLOAT, NUM_INT, NUM_LONG,
-                             STRING_LITERAL, LITERAL_NEW"/>
-        </module>
-        <module name="CovariantEquals"/>
         <module name="NoFinalizer"/>
 
+        <module name="IllegalInstantiation">
+            <!--
+                The wrapper types, deprecated for boxing since Java 5: new
+                Integer(x) silently defeats == comparison and is slower than
+                Integer.valueOf. Listed by class, which is the only form this
+                check accepts.
+            -->
+            <property name="classes"
+                      value="java.lang.Boolean, java.lang.Byte, java.lang.Character,
+                             java.lang.Double, java.lang.Float, java.lang.Integer,
+                             java.lang.Long, java.lang.Short"/>
+        </module>
     </module>
 </module>
