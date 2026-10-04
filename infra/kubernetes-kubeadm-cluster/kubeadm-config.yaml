@@ -1,0 +1,70 @@
+# kubeadm configuration for the CRM cluster.
+#
+#   kubeadm init --config kubeadm-config.yaml --upload-certs
+#
+# Two documents, InitConfiguration and ClusterConfiguration. The KubeletConfiguration
+# is NOT here: kubeadm does not read it from this file. It goes into the
+# kubelet-config ConfigMap, which is what the last step of init-control-plane.sh does,
+# and putting it here would look correct and do nothing.
+#
+# Both REPLACE_WITH_ values are substituted by init-control-plane.sh before kubeadm
+# reads this file. A literal one is refused by the pre-flight check at the top of that
+# script, because kubeadm would otherwise accept it and produce a cluster whose API
+# server points at a host named REPLACE_WITH_PRIVATE_IP.
+
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  # The PRIVATE address of this machine, not the public one. The public address is a
+  # Standard load balancer in front of the VM, and telling the API server to advertise
+  # its own load balancer is a loop; the symptom is a node that never finishes joining.
+  bindPort: 6443
+  advertiseAddress: REPLACE_WITH_PRIVATE_IP
+nodeRegistration:
+  name: crm-control-plane
+  # With a current containerd the runtime endpoint is this socket. Guides that say
+  # unix:///var/run/dockershim.sock describe a path that stopped existing when
+  # dockershim was removed in Kubernetes 1.24. kubeadm fails early and clearly on a
+  # wrong socket, so it is a cheap thing to get right.
+  criSocket: unix:///run/containerd/containerd.sock
+  imagePullPolicy: IfNotPresent
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.31.4
+clusterName: crm
+controlPlaneEndpoint: "REPLACE_WITH_PRIVATE_IP:6443"
+
+networking:
+  # The pod network. Must not overlap the Azure VNet that Terraform created, which is
+  # 10.20.0.0/16, nor the service network below. 10.244.0.0/16 is flannel's documented
+  # default and collides with neither.
+  #
+  # An overlap does not fail loudly. Nodes come up, pods get addresses the VNet router
+  # also hands out, and pod-to-pod traffic leaves the machine and returns to the wrong
+  # place. The overlap check at the end of init-control-plane.sh exists for this.
+  podSubnet: 10.244.0.0/16
+  # The service network. Must not overlap the pod network or the VNet. 10.96.0.0/12 is
+  # the documented default range and the one the manifests' 10.20.x addresses assume
+  # nothing about.
+  serviceSubnet: 10.96.0.0/12
+  dnsDomain: cluster.local
+
+apiServer:
+  extraArgs:
+    authorization-mode: "Node,RBAC"
+  certSANs:
+    # The public address, because the kubeconfig copied off this machine will be used
+    # from a machine that is not this one. A certificate covering only the private
+    # address produces an x509 error that reads like a network fault.
+    - REPLACE_WITH_PUBLIC_IP
+    - REPLACE_WITH_PRIVATE_IP
+  timeoutForControlPlane: 5m
+
+# Left at their defaults on purpose. This is a lab control plane, and tuning one
+# without a reason is how a control plane becomes the slow part.
+controllerManager:
+  extraArgs: {}
+scheduler:
+  extraArgs: {}
