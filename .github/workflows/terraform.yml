@@ -38,6 +38,23 @@ env:
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "false"
 
+  # A throwaway public key, present only so `plan` can run.
+  #
+  # ssh_public_key has no default on purpose: a machine with an authorised key is a
+  # machine someone can log into, and the one thing this configuration must not do is
+  # ship a real key in a repository. With no value at all, plan stops before it reaches
+  # Azure with "No value for required variable", which is the correct refusal and also
+  # means the plan never gets far enough to find out whether the Azure credentials work.
+  #
+  # So the workflow supplies a real, well-formed ed25519 public key that belongs to
+  # nothing: its private half was generated once, never committed, and thrown away. A
+  # public key on its own grants access to no machine. It exists to satisfy the variable
+  # and its validation, and it is what lets the plan authenticate.
+  #
+  # A real deployment needs the operator's own key in terraform.tfvars, which is
+  # gitignored. Nothing here applies anything.
+  TF_VAR_ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQoOEOqe0upcgd/nmn1kX5iEfMF/1aLKj2zjKxS94F7 plan-only-not-a-real-key"
+
 jobs:
   terraform:
     name: terraform
@@ -169,8 +186,14 @@ jobs:
             elif [ "${code}" -eq 0 ]; then
               echo "Nothing to do: the state already matches the configuration."
             else
-              echo "The plan **failed**, so the credentials or the configuration are wrong."
+              echo "The plan **failed**. If it stopped on Azure, the credentials are"
+              echo "wrong: a wrong subscription, a wrong tenant, or a principal without"
+              echo "the Contributor role on the subscription."
             fi
+            echo ""
+            echo "ssh_public_key was satisfied by a throwaway key in this workflow, so"
+            echo "the plan's machine would not be reachable if this were ever applied."
+            echo "A real deployment needs your own key in terraform.tfvars."
             echo ""
             echo '```'
             grep -E '^(Plan:|No changes|Error:|╷|│|╵)' /tmp/plan.txt || tail -20 /tmp/plan.txt
