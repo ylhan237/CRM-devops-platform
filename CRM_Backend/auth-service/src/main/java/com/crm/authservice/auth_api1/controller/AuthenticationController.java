@@ -46,6 +46,14 @@ import java.util.Optional;
 // @CrossOrigin(origins = "http://localhost:4200")
 public class AuthenticationController {
 
+    /**
+     * The other endpoints in this file declare a local logger in every method.
+     * A constant is added rather than eight more local declarations, and it is
+     * named LOGGER so it cannot be confused with, or silently shadowed by, those
+     * locals.
+     */
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuthenticationController.class);
+
     private final AuthenticationService service;
 
 
@@ -476,17 +484,91 @@ public ResponseEntity<Map<String, String>> logout(@RequestHeader(value = "Author
     }
 
 
+    private static final String BEARER = "Bearer ";
+
+    /**
+     * The authenticated caller, or null when the request carries no usable token.
+     *
+     * <p>This controller authorizes by hand rather than through Spring Security
+     * method security, so every protected endpoint has to repeat the same
+     * preamble. It is centralised here instead of being copied a fourth time.
+     *
+     * <p>The subject of the token is the email address, not the numeric
+     * identifier: {@code User.getUsername()} returns the email and that is what
+     * {@code JwtService} writes into the token. The identifier in the URL is an
+     * {@code Integer} in the entity and a {@code Long} in the path, so the two
+     * are compared as longs.
+     */
+    private User authenticatedCaller(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith(BEARER)) {
+            LOGGER.warn("Authorization token is missing or invalid.");
+            return null;
+        }
+
+        String jwt = authHeader.substring(BEARER.length());
+        try {
+            String email = jwtService.extractUsername(jwt);
+            return userRepository.findByEmail(email).orElse(null);
+        } catch (Exception e) {
+            // An expired, tampered or otherwise unreadable token lands here.
+            LOGGER.error("Failed to identify the caller from the JWT: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private boolean hasRole(String authHeader, String role) {
+        try {
+            return role.equals(jwtService.extractUserRole(authHeader.substring(BEARER.length())));
+        } catch (Exception e) {
+            LOGGER.error("Failed to read the role from the JWT: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Whether the caller is allowed to act on the resource owned by {@code ownerId}.
+     *
+     * <p>An administrator may act on anyone's, because that is what the role is
+     * for. A regular user may only act on their own.
+     *
+     * <p>This is the check the three profile photo endpoints were missing. The
+     * identifier comes from the URL and nothing tied it to the caller, so any
+     * request could name any user: uploading, replacing or deleting someone
+     * else's photo needed no credential at all.
+     */
+    private boolean mayActOn(User caller, String authHeader, Long ownerId) {
+        if (hasRole(authHeader, "ADMIN")) {
+            return true;
+        }
+        return caller.getId() != null && caller.getId().longValue() == ownerId.longValue();
+    }
+
     @PostMapping("/{userId}/upload")
     public ResponseEntity<?> uploadProfilePhoto(
-            @PathVariable Long userId,  // Retrieve candidateId from URL path
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @PathVariable Long userId,
             @RequestParam("file") MultipartFile file) {
+
+        User caller = authenticatedCaller(authHeader);
+        if (caller == null) {
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Authorization token is required.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        if (!mayActOn(caller, authHeader, userId)) {
+            LOGGER.warn("User {} attempted to upload a profile photo for user {}.", caller.getId(), userId);
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "You may only change your own profile photo.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
         try {
             // Pass the file and candidateId to the service layer for processing
             profilePhotoService.saveProfilePhoto(file, userId);
-            Map<String, Object> Response = new HashMap<>();
-            Response.put("message", "Profile photo uploaded successfully.");
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Profile photo uploaded successfully.");
 
-            return ResponseEntity.ok(Response);
+            return ResponseEntity.ok(response);
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Failed to upload profile photo: " + e.getMessage());
@@ -498,38 +580,118 @@ public ResponseEntity<Map<String, String>> logout(@RequestHeader(value = "Author
 
     // Update profile photo (Update operation)
     @PutMapping("/{userId}/update")
-    public ResponseEntity<String> updateProfilePhoto(
+    public ResponseEntity<?> updateProfilePhoto(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             @PathVariable Long userId,
             @RequestParam("file") MultipartFile file) {
+
+        User caller = authenticatedCaller(authHeader);
+        if (caller == null) {
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Authorization token is required.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        if (!mayActOn(caller, authHeader, userId)) {
+            LOGGER.warn("User {} attempted to update the profile photo of user {}.", caller.getId(), userId);
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "You may only change your own profile photo.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
         try {
             profilePhotoService.updateProfilePhoto(file, userId);
-            return ResponseEntity.ok("Profile photo updated successfully.");
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Profile photo updated successfully.");
+            return ResponseEntity.ok(response);
         } catch (IOException e) {
-            return ResponseEntity.status(500).body("Failed to update profile photo: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to update profile photo: " + e.getMessage());
         } catch (RuntimeException e) {
-            return ResponseEntity.status(404).body("Candidate not found: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body("Candidate not found: " + e.getMessage());
         }
     }
 
     // Delete profile photo by candidate ID (Delete operation)
     @DeleteMapping("/{userId}/delete")
-    public ResponseEntity<String> deleteProfilePhoto(@PathVariable Long userId) {
+    public ResponseEntity<?> deleteProfilePhoto(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @PathVariable Long userId) {
+
+        User caller = authenticatedCaller(authHeader);
+        if (caller == null) {
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Authorization token is required.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        if (!mayActOn(caller, authHeader, userId)) {
+            LOGGER.warn("User {} attempted to delete the profile photo of user {}.", caller.getId(), userId);
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "You may only change your own profile photo.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
         try {
             profilePhotoService.deleteProfilePhoto(userId);
-            return ResponseEntity.ok("Profile photo deleted successfully.");
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Profile photo deleted successfully.");
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Failed to delete profile photo: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to delete profile photo: " + e.getMessage());
         }
     }
+
+    /**
+     * Administrator only.
+     *
+     * <p>The pair of endpoints below answered, to anyone who asked, whether an
+     * account exists for a given name and what its email address is. That is an
+     * enumeration oracle: it turns a public form into a way of listing the user
+     * base, one full name at a time, and the email address is the identifier
+     * every other part of the system accepts as a login.
+     *
+     * <p>Neither is called by the frontend, so closing them changes nothing for
+     * the application.
+     */
     @GetMapping("/{userFullName}/exists")
-    public ResponseEntity<Boolean> doesUserExist(@PathVariable String userFullName) {
-        boolean exists = service.doesUserExist(userFullName);
-        return ResponseEntity.ok(exists);
+    public ResponseEntity<?> doesUserExist(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @PathVariable String userFullName) {
+
+        if (authenticatedCaller(authHeader) == null) {
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Authorization token is required.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        if (!hasRole(authHeader, "ADMIN")) {
+            LOGGER.warn("A non administrator asked whether an account exists.");
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Administrator role required.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
+        return ResponseEntity.ok(service.doesUserExist(userFullName));
     }
+
     @GetMapping("/{userfullname}/email")
-    public ResponseEntity<String> getEmailByFullName(@PathVariable("userfullname") String userFullName) {
-        String email = service.getEmailByFullName(userFullName);
-        return ResponseEntity.ok(email);
+    public ResponseEntity<?> getEmailByFullName(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @PathVariable("userfullname") String userFullName) {
+
+        if (authenticatedCaller(authHeader) == null) {
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Authorization token is required.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        if (!hasRole(authHeader, "ADMIN")) {
+            LOGGER.warn("A non administrator asked for the email address of an account.");
+            Map<String, String> response = new HashMap<>();
+            response.put("error", "Administrator role required.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
+        return ResponseEntity.ok(service.getEmailByFullName(userFullName));
     }
 
 }
