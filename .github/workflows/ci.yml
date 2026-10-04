@@ -158,7 +158,29 @@ jobs:
 
       - name: Frontend specs
         working-directory: Front/CRM
-        run: npm run test:ci
+        # Coverage on, not off: this run produces the report that
+        # coverage-gate reads, so instrumenting here costs one extra pass and
+        # saves running the whole suite a second time.
+        run: npm run test:coverage
+
+      # The coverage job runs on its own runner, so the reports have to travel.
+      # Without this the job checks out a clean tree, finds no jacoco.xml, and
+      # fails on a report that was produced successfully a minute earlier.
+      - name: Upload backend coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: CRM_Backend/*/target/site/jacoco/jacoco.xml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: istanbul-report
+          path: Front/CRM/coverage/crm/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
 
   # ----------------------------------------------------- integration-test ----
   # Tests that need a real MySQL. Testcontainers starts it, so no service has to
@@ -179,17 +201,20 @@ jobs:
           cache-dependency-path: CRM_Backend/**/pom.xml
 
       - name: Integration tests
-        # Surefire and failsafe are split by naming convention in build-tools:
-        # *Test runs in the unit-test job, *IT runs here. The flag turns off the
-        # unit tests for this run so the same containers are not started twice.
+        # The failsafe goals are invoked directly rather than through `verify`.
+        # Going through the lifecycle re-runs surefire, which would repeat the
+        # whole unit suite on every service and start the same containers again
+        # for a result already produced by the unit-test job.
+        #
+        # No -Dit.test either: build-tools already includes **/*IT.java, and
+        # passing the pattern as a filter is what produced "No tests matching
+        # pattern *IT" on the services that have none.
         run: |
           status=0
           for module in $BACKEND_MODULES; do
             echo "::group::$module"
-            mvn -B -ntp -f "CRM_Backend/$module/pom.xml" verify \
-              -DskipTests=false \
-              -Dsurefire.skip=true \
-              -Dit.test='*IT' || status=1
+            mvn -B -ntp -f "CRM_Backend/$module/pom.xml" \
+              test-compile failsafe:integration-test failsafe:verify || status=1
             echo "::endgroup::"
           done
           exit $status
@@ -220,8 +245,12 @@ jobs:
       - name: Schema contract against a real MySQL 8
         # An *IT, because it needs a real database: Testcontainers starts MySQL
         # 8 so the schema is produced by the migrations themselves rather than
-        # by whatever H2 happens to be on the classpath.
-        run: mvn -B -ntp -f CRM_Backend/auth-service/pom.xml verify -Dit.test='*Schema*IT'
+        # by whatever H2 happens to be on the classpath. Failsafe is invoked
+        # directly so this job does not repeat the unit suite.
+        run: |
+          mvn -B -ntp -f CRM_Backend/auth-service/pom.xml \
+            test-compile failsafe:integration-test failsafe:verify \
+            -Dit.test='*Schema*IT'
 
   # ------------------------------------------------------- coverage-gate ----
   # Aggregates what unit-test produced. The floor is checked on the total
@@ -234,42 +263,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
-          # No pom at the repository root, the seven modules each have their
-          # own, so the default lookup finds nothing to hash.
-          cache-dependency-path: CRM_Backend/**/pom.xml
-
-      - name: Backend coverage
-        run: |
-          reports=""
-          for module in $BACKEND_MODULES; do
-            report="CRM_Backend/$module/target/site/jacoco/jacoco.xml"
-            if [ -f "$report" ]; then
-              reports="$reports $report"
-            else
-              echo "No JaCoCo report for $module, expected at $report" >&2
-              exit 1
-            fi
-          done
-          node scripts/check-coverage.mjs --floor "$BACKEND_COVERAGE_FLOOR" --format jacoco $reports
-
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: Front/CRM/package-lock.json
 
-      - name: Install frontend dependencies
-        working-directory: Front/CRM
-        run: npm install --no-audit --no-fund
+      # The reports were produced on the unit-test runner. They are downloaded,
+      # never regenerated: running the suite twice to measure it twice would
+      # double the slowest job in the pipeline for no extra information.
+      - name: Download backend coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: jacoco-reports
+          path: coverage-reports
 
-      - name: Frontend coverage
-        working-directory: Front/CRM
-        run: npm run test:coverage
+      - name: Download frontend coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: istanbul-report
+          path: coverage-frontend
+
+      - name: Backend coverage floor
+        run: |
+          count=$(find coverage-reports -name 'jacoco.xml' | wc -l)
+          if [ "$count" -ne 7 ]; then
+            echo "Expected 7 JaCoCo reports, found $count." >&2
+            find coverage-reports -name 'jacoco.xml'
+            exit 1
+          fi
+          node scripts/check-coverage.mjs \
+            --floor "$BACKEND_COVERAGE_FLOOR" \
+            --format jacoco \
+            $(find coverage-reports -name 'jacoco.xml')
 
       - name: Frontend coverage floor
         # The two floors are checked separately rather than added together: a
@@ -279,7 +303,7 @@ jobs:
           node scripts/check-coverage.mjs \
             --floor "$FRONTEND_COVERAGE_FLOOR" \
             --format istanbul \
-            Front/CRM/coverage/crm/coverage-summary.json
+            coverage-frontend/coverage-summary.json
 
   # ---------------------------------------------------------------- gate ----
   # The single signal main's branch protection reads.

@@ -190,6 +190,15 @@
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>
+                    <!--
+                        Most services have no integration test yet. Without this
+                        failsafe fails them with "No tests matching pattern
+                        *IT", so the pipeline went red on six of the seven for
+                        having nothing to complain about. A module with no
+                        integration test is a module with nothing to fail.
+                    -->
+                    <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+                    <failIfNoTests>false</failIfNoTests>
                 </configuration>
                 <executions>
                     <execution>
