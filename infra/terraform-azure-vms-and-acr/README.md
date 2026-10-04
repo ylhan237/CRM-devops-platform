@@ -84,6 +84,32 @@ Until those three secrets exist, the mirror job in `release.yml` announces that
 it is skipping and the release succeeds against GHCR alone. Nothing has to be
 re-run after adding them: the next release picks them up.
 
+## The secrets, and their verified state as of this writing
+
+GitHub will not read a secret back, so "the secret is set" and "the secret is
+correct" are two different claims. What can be checked is which names exist:
+
+| Secret | Set? | Read by |
+|---|---|---|
+| `ARM_SUBSCRIPTION_ID` | yes | this configuration |
+| `ARM_TENANT_ID` | yes | this configuration |
+| `ARM_CLIENT_ID` | yes | this configuration |
+| `ARM_CLIENT_SECRET` | yes | this configuration |
+| `AZURE_REGISTRY` | **no** | the ACR mirror in `release.yml` |
+| `AZURE_REGISTRY_USERNAME` | **no** | the ACR mirror in `release.yml` |
+| `AZURE_REGISTRY_PASSWORD` | **no** | the ACR mirror in `release.yml` |
+
+The three Azure ones cannot be set yet, and that is not an oversight to fix: there
+is no ACR to authenticate against, because no `apply` has been run. The order is
+`apply` first, then a service principal with `AcrPush`, then the secrets.
+
+The four `ARM_*` **names** are correct for this configuration. Whether their
+**values** are correct is only knowable by running a `plan`, which is what
+`.github/workflows/terraform.yml` exists for: it authenticates against Azure and
+asks what exists, and it fails on a wrong subscription, a wrong tenant, or a
+principal without the **Contributor** role on the subscription. Until that workflow
+has run green, these four secrets are present and unverified.
+
 ## What was verified, and what was not
 
 `terraform init`, `terraform fmt` and `terraform validate` all pass against
