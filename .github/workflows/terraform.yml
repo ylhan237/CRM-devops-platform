@@ -119,15 +119,22 @@ jobs:
           fi
           echo "Formatting is clean."
 
-      # -backend=false: the backend is local, there is no remote state to fetch, and
-      # initialising a backend this job cannot write to is a failure with no cause.
+      # A plain init, no -backend=false.
       #
-      # No -lockfile=readonly here, deliberately. The lock file is gitignored in this
+      # The first version of this step passed -backend=false on the reasoning that the
+      # backend is local and there is no remote state to fetch. That is true, and it is
+      # exactly why the flag must not be there: -backend=false skips backend
+      # initialisation, and `terraform plan` then refuses to run with "Backend
+      # initialization required". The step was written to avoid a problem it created.
+      #
+      # With a local backend, init writes terraform.tfstate into the workspace, which is
+      # gitignored and thrown away with the runner. Nothing to fetch, nothing to protect.
+      #
+      # No -lockfile=readonly either, deliberately. The lock file is gitignored in this
       # configuration, so it is absent from the checkout, and readonly explicitly
-      # refuses to run without an existing lock file. That flag belongs to a
-      # configuration that commits its lock file.
+      # refuses to run without an existing lock file.
       - name: terraform init
-        run: terraform init -backend=false -input=false -no-color
+        run: terraform init -input=false -no-color
 
       - name: terraform validate
         run: terraform validate -no-color
@@ -210,6 +217,10 @@ jobs:
       # includes the credentials it was given. It is a credential on disk, and this step
       # runs even when the plan failed, which is when a partial file is most likely to
       # be left behind.
-      - name: Remove the plan file
+      #
+      # terraform.tfstate is removed for the same reason. Nothing applies, so it should
+      # be empty, but an init on a local backend writes the file and there is no reason
+      # to leave it lying about.
+      - name: Remove the plan file and any state
         if: always()
-        run: rm -f tfplan
+        run: rm -f tfplan terraform.tfstate terraform.tfstate.backup
