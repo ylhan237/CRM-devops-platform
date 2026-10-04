@@ -1,0 +1,75 @@
+{{- /*
+MySQL's Service is headless: clusterIP None.
+
+A headless Service gives the pod a stable DNS name, mysql-0.mysql-headless.ns,
+which is what a StatefulSet needs its serviceName to resolve to. A normal
+ClusterIP Service would work for the application, because everything here talks
+to the one replica, and it is kept alongside this one for that reason: the
+headless one exists for the StatefulSet's identity, not for the clients.
+*/ -}}
+{{- if .Values.mysql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "crm.fullname" . }}-mysql
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+spec:
+  clusterIP: None
+  selector:
+    {{- include "crm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+  ports:
+    - name: mysql
+      port: {{ .Values.mysql.port }}
+      targetPort: mysql
+---
+{{/*
+The schema initialisation, run by the MySQL image once, on an empty data
+directory.
+
+The point of this script is the grants, not the schemas. Each service already
+carries createDatabaseIfNotExist=true in its JDBC URL and would create its own
+schema, but the single shared account the compose file uses is granted only on
+the one schema the image was told about. Without these grants the four services
+that connect to a different schema get "access denied", which reads like a
+credentials problem and is actually a privileges one.
+*/ -}}
+{{- if .Values.mysql.initDatabase }}
+{{- $fullName := include "crm.fullname" . -}}
+{{- $grantUser := .Values.mysql.initScripts.grantUser -}}
+{{- if .Values.secrets.create }}{{- $grantUser = .Values.secrets.mysqlUser -}}{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullName }}-mysql-init
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+data:
+  01-schemas.sql: |
+    {{- range $key, $cfg := .Values.mysql.initScripts }}
+    {{- if and (kindIs "map" $cfg) $cfg.enabled $cfg.schema }}
+    CREATE DATABASE IF NOT EXISTS `{{ $cfg.schema }}`;
+    {{- end }}
+    {{- end }}
+{{- if $grantUser }}
+  02-grants.sql: |
+    -- Runs as root, which is what the image does on first boot.
+    --
+    -- The image grants MYSQL_USER on its own database only, so every other schema
+    -- needs its grant. Without these, a service that connects to a second schema
+    -- gets "access denied", which reads like bad credentials and is actually
+    -- missing privileges.
+    {{- range $key, $cfg := .Values.mysql.initScripts }}
+    {{- if and (kindIs "map" $cfg) $cfg.enabled $cfg.schema }}
+    GRANT ALL PRIVILEGES ON `{{ $cfg.schema }}`.* TO '{{ $grantUser }}'@'%';
+    {{- end }}
+    {{- end }}
+    FLUSH PRIVILEGES;
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,31 @@
+apiVersion: v2
+name: crm
+description: >-
+  The CRM application: MySQL, the Eureka registry, seven Spring Boot services,
+  the gateway, and the Angular bundle behind one Ingress.
+
+# The chart version follows the chart. The application version follows the
+# release it was cut from, and is the tag the images are published under. They
+# are two numbers because they answer two questions: "did the packaging change"
+# and "did the application change".
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.28.0-0"
+
+keywords:
+  - crm
+  - spring-boot
+  - microservices
+
+maintainers:
+  - name: ylhan237
+
+annotations:
+  # note.md section 4.3, stage 4.4. The plain manifests in
+  # infra/kubernetes-manifests carry the same application; this chart is the same
+  # objects parameterised, so that an environment is values rather than a
+  # second copy of the YAML.
+  crm.devops/note-section: "4.3"
+  crm.devops/note-stage: "4.4"

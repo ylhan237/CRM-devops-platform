@@ -1,0 +1,91 @@
+{{- /*
+The service registry, rendered first in name and first in dependency.
+
+It has no persistence because Eureka holds its registry in memory. Losing it
+means the services re-register, which is a few seconds of a failed lookup at the
+worst moment, and a PersistentVolumeClaim would be solving a problem nobody has.
+
+It is also the only service here that can answer an HTTP health check, because it
+is the only one carrying the actuator starter. That is why its probes are httpGet
+while every other service uses tcpSocket, and why the two are not unified: making
+them uniform would mean either breaking six probes or adding the actuator to six
+poms.
+*/ -}}
+{{- if .Values.serviceDiscovery.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceDiscovery.name }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.serviceDiscovery.name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "crm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.serviceDiscovery.name }}
+  ports:
+    - name: http
+      port: {{ .Values.serviceDiscovery.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.serviceDiscovery.name }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.serviceDiscovery.name }}
+spec:
+  replicas: {{ .Values.serviceDiscovery.replicas }}
+  selector:
+    matchLabels:
+      {{- include "crm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.serviceDiscovery.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "crm.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.serviceDiscovery.name }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "crm.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: {{ .Values.serviceDiscovery.name }}
+          image: {{ include "crm.image" (dict "root" . "name" .Values.serviceDiscovery.name) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.serviceDiscovery.port }}
+          env:
+            # The in-cluster Service name. This is the one address that cannot be
+            # pointed outside, because the registry is inside the cluster.
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://{{ .Values.serviceDiscovery.name }}:{{ .Values.serviceDiscovery.port }}/eureka/"
+            - name: EUREKA_INSTANCE_HOSTNAME
+              value: {{ .Values.serviceDiscovery.name | quote }}
+          {{- if .Values.serviceDiscovery.actuator }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          {{- else }}
+          {{- include "crm.backendProbes" (dict "port" .Values.serviceDiscovery.port "readiness" (dict "initialDelaySeconds" 40 "periodSeconds" 10) "liveness" (dict "initialDelaySeconds" 90 "periodSeconds" 20)) | nindent 10 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.serviceDiscovery.resources | nindent 12 }}
+      {{- include "crm.scheduling" . | nindent 6 }}
+{{- end }}
