@@ -13,7 +13,7 @@ import { SuccessComponent } from '../../modals/success/success.component';
 import { CandidateServiceService } from '../../services/candidate/candidate-service.service';
 import { CandidateFilterPipe } from "../../pipes/candidate-filter/candidate-filter.pipe";
 import { Candidate } from '../../models/candidate';
-import { MatDialogRef } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MessageService } from 'primeng/api';
 import{MatDialog} from '@angular/material/dialog';
 
@@ -30,7 +30,8 @@ import{MatDialog} from '@angular/material/dialog';
     ToastModule,
     ButtonModule,
     CandidateFilterPipe,
-    RouterModule
+    RouterModule,
+    MatDialogModule
 ],
   templateUrl: './candidates.component.html',
   styleUrl: './candidates.component.scss',

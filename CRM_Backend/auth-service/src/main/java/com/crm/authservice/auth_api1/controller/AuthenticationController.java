@@ -10,7 +10,6 @@ import com.crm.authservice.auth_api1.Service.AuthenticationService;
 import com.crm.authservice.auth_api1.Service.ProfilePhotoService;
 import com.crm.authservice.auth_api1.Service.RoleService;
 import com.crm.authservice.auth_api1.filters.JwtService;
-import com.crm.authservice.auth_api1.handle.UserNotFoundException;
 import com.crm.authservice.auth_api1.models.ProfilePhoto;
 import com.crm.authservice.auth_api1.models.Role;
 import com.crm.authservice.auth_api1.models.User;
@@ -227,7 +226,7 @@ public class AuthenticationController {
             User updatedUser = service.updateUser(id, updatedUserDetails);
             logger.info("User updated successfully: {}", updatedUser);
             return ResponseEntity.ok(updatedUser);
-        } catch (UserNotFoundException e) {
+        } catch (UsernameNotFoundException e) {
             logger.error("User not found with ID: {}", id);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + id);
         } catch (Exception e) {
@@ -269,7 +268,7 @@ public class AuthenticationController {
             service.deleteUser(id);
             logger.info("User with ID {} deleted successfully.", id);
             return ResponseEntity.noContent().build();
-        } catch (UserNotFoundException e) {
+        } catch (UsernameNotFoundException e) {
             logger.warn("User not found with ID: {}", id);
             Map<String, String> response = new HashMap<>();
             response.put("error", "User not found with ID: " + id);
@@ -356,7 +355,7 @@ public class AuthenticationController {
             User user = service.getUserById(id);
             logger.info("User retrieved successfully: {}", user);
             return ResponseEntity.ok(user);
-        } catch (UserNotFoundException e) {
+        } catch (UsernameNotFoundException e) {
             logger.error("User not found with ID: {}", id);
             Map<String, String> response = new HashMap<>();
             response.put("error", "User not found with ID: " + id);
@@ -695,6 +694,5 @@ public ResponseEntity<Map<String, String>> logout(@RequestHeader(value = "Author
     }
 
 }
-
 
 

@@ -14,7 +14,7 @@ import { FieldFilterPipe } from "../../pipes/fieldFilter/field-filter.pipe";
 import { MatIconModule, MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { ToastModule } from 'primeng/toast';
-import { MatDialog, MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { DatePipe } from '@angular/common';
 
 
@@ -31,7 +31,8 @@ import { DatePipe } from '@angular/common';
     MatCheckbox,
     FieldFilterPipe,
     ToastModule,
-    MatIconModule
+    MatIconModule,
+    MatDialogModule
   ],
   providers: [DatePipe],
   styleUrls: ['./event.component.scss']

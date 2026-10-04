@@ -8,10 +8,9 @@ import { DropdownModule } from "primeng/dropdown";
 import { MatIcon, MatIconModule, MatIconRegistry } from "@angular/material/icon";
 import { MatCheckbox } from "@angular/material/checkbox";
 import { FieldFilterPipe } from "../../pipes/fieldFilter/field-filter.pipe";
-import { MatDialog } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { DomSanitizer } from '@angular/platform-browser';
 import { ToastModule } from 'primeng/toast';
-import { MatDialogRef } from '@angular/material/dialog';
 
 import { positiveNumberValidator } from './validators';
 
@@ -28,6 +27,7 @@ import { positiveNumberValidator } from './validators';
     FieldFilterPipe,
     ToastModule,
     MatIconModule,
+    MatDialogModule,
 
   ],
   styleUrls: ['./venue.component.scss']  // Changed stylesheet to venue.component.scss

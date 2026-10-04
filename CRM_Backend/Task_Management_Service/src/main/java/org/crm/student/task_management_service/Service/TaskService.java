@@ -62,7 +62,9 @@ public class TaskService {
             throw new IllegalArgumentException("Invalid assignedTo: " + task.getAssignedTo());
         }
 
-        if (!"no association".equals(task.getCandidateFullname())) {
+        if (task.getCandidateFullname() != null
+                && !task.getCandidateFullname().isBlank()
+                && !"no association".equalsIgnoreCase(task.getCandidateFullname())) {
             boolean isCandidateValid = candidateClient.validateCandidate(task.getCandidateFullname());
 
             if (!isCandidateValid) {
@@ -126,10 +128,19 @@ public class TaskService {
         return taskRepository.findByStatus(status);
     }
 
-    public Optional<Task> updateTask(Long id, Task updatedTask) {
+    public Optional<Task> updateTask(Long id, Task updatedTask, String authorization) {
         return taskRepository.findById(id).map(task -> {
             if (updatedTask.isCompleted() && LocalDate.now().isAfter(task.getDeadline())) {
                 throw new IllegalStateException("Task cannot be marked as completed because the deadline has passed.");
+            }
+
+            String updatedAssignee = updatedTask.getAssignedTo();
+            if (updatedAssignee != null && !updatedAssignee.equals(task.getAssignedTo())) {
+                if (!userClient.validateUser(updatedAssignee, authorization)) {
+                    throw new IllegalArgumentException("Invalid assignedTo: " + updatedAssignee);
+                }
+                task.setAssignedTo(updatedAssignee);
+                task.setAssignedToEmail(getAssignedToEmail(updatedAssignee, authorization));
             }
 
             // Update task fields
@@ -137,7 +148,6 @@ public class TaskService {
             task.setType(updatedTask.getType());
             task.setDeadline(updatedTask.getDeadline());
             task.setPriority(updatedTask.getPriority());
-            task.setAssignedTo(updatedTask.getAssignedTo());
             task.setStatus(updatedTask.getStatus());
             task.setCompleted(updatedTask.isCompleted());
 

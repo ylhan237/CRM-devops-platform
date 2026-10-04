@@ -94,6 +94,37 @@ class TaskServiceTest {
     }
 
     @Test
+    void updateTaskRefreshesTheAssignedEmailWhenTheAssigneeChanges() {
+        Task existing = new Task();
+        existing.setId(7L);
+        existing.setAssignedTo("Grace Hopper");
+        existing.setAssignedToEmail("grace@example.com");
+        existing.setDeadline(LocalDate.now().plusDays(1));
+        Task update = new Task();
+        update.setAssignedTo("Ada Lovelace");
+        update.setDescription("Review application");
+        update.setType("Email");
+        update.setDeadline(existing.getDeadline());
+        update.setPriority(Task.Priority.HIGH);
+
+        when(taskRepository.findById(7L)).thenReturn(Optional.of(existing));
+        when(userClient.validateUser("Ada Lovelace", "Bearer admin-token")).thenReturn(true);
+        when(restTemplate.exchange(
+                eq("http://localhost:8060/api/v1/auth/Ada Lovelace/email"),
+                eq(HttpMethod.GET),
+                any(),
+                eq(String.class)))
+                .thenReturn(ResponseEntity.ok("ada@example.com"));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        Optional<Task> result = taskService.updateTask(7L, update, "Bearer admin-token");
+
+        assertEquals("Ada Lovelace", result.orElseThrow().getAssignedTo());
+        assertEquals("ada@example.com", result.orElseThrow().getAssignedToEmail());
+        verify(taskRepository).save(argThat(saved -> "ada@example.com".equals(saved.getAssignedToEmail())));
+    }
+
+    @Test
     void markTaskAsCompleted_shouldRejectWhenDeadlinePassed() {
         Task task = new Task();
         task.setId(7L);

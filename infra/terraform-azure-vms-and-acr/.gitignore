@@ -1,0 +1,21 @@
+# Holds the ACR login server, the resource ids and the machine address.
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate.info
+
+# Holds the SSH public key and anything else filled in locally.
+terraform.tfvars
+*.auto.tfvars
+
+# The lock file records the provider checksums. It is normally committed; it is
+# ignored here because this configuration is created before the project settles
+# and a stale checksum would be worse than none.
+.terraform/
+.terraform.lock.hcl
+
+crash.log
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

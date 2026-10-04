@@ -41,4 +41,16 @@ class TaskControllerTest {
         assertEquals(tasks, response.getBody());
         verify(taskService).getTasksByCandidateId("Ada Lovelace");
     }
+
+    @Test
+    void updateTaskForwardsAuthorizationToService() {
+        Task task = new Task();
+        when(taskService.updateTask(7L, task, "Bearer token")).thenReturn(java.util.Optional.of(task));
+
+        ResponseEntity<Task> response = taskController.updateTask("Bearer token", 7L, task);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(task, response.getBody());
+        verify(taskService).updateTask(7L, task, "Bearer token");
+    }
 }

@@ -44,10 +44,11 @@ jobs:
   #
   # It used to be written out in five places with the same expression, and that
   # duplication is what made the first run fail. That expression passed
-  # `inputs.tag || startsWith(...)` as the value of metadata-action's enable
-  # attribute, and `||` does not return a boolean: it returns the first truthy
-  # *value*. A dispatch carrying tag=v0.0.1 therefore evaluated the condition to
-  # the string "v0.0.1", and metadata-action refused it:
+  # the logical OR of inputs.tag and startsWith(...) as the value of
+  # metadata-action's enable attribute. That OR does not return a boolean: it
+  # returns the first truthy *value*. A dispatch carrying tag=v0.0.1 therefore
+  # evaluated the condition to the string "v0.0.1", and metadata-action refused
+  # it:
   #
   #   Invalid value for enable attribute: v0.0.1
   #

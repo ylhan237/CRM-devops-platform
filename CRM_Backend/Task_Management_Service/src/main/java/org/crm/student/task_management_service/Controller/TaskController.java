@@ -11,7 +11,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Optional;
 
- @CrossOrigin(origins = "http://localhost:4200")
+@CrossOrigin(origins = "${CORS_ALLOWED_ORIGIN:http://localhost:4200}")
 @RestController
 @RequestMapping("/tasks")
 public class TaskController {
@@ -43,8 +43,11 @@ public class TaskController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Task> updateTask(@PathVariable Long id, @Valid @RequestBody Task updatedTask) {
-        return taskService.updateTask(id, updatedTask)
+    public ResponseEntity<Task> updateTask(
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @PathVariable Long id,
+            @Valid @RequestBody Task updatedTask) {
+        return taskService.updateTask(id, updatedTask, authorization)
                 .map(task -> new ResponseEntity<>(task, HttpStatus.OK))
                 .orElse(new ResponseEntity<>(HttpStatus.NOT_FOUND));
     }

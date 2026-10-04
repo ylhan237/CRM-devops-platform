@@ -118,20 +118,6 @@ private handleError(error: any) {
   }
 
 
-  clearTokenOnReload(): void {
-    const token = this.getToken();
-    if (token) {
-      this.http.post(`${this.baseUrl}logout`, { token }, { responseType: 'text' }).subscribe(
-        () => {
-          localStorage.removeItem('jwtToken');
-        },
-        () => {}
-      );
-    }
-  }
-
-
 }
-
 
 

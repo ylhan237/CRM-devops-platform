@@ -84,10 +84,6 @@ public class Candidate{
             status = Status.NEW;
         }
     }
-    public void setInstitutionName(String institutionName) {
-    }
-    public void setGraduationYear(int graduationYear) {
-    }
     // Logic to generate Candidate ID
     private void generateCandidateId() {
         // Get the current year (e.g., 2024)

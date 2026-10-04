@@ -125,6 +125,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-user-service}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:4200}
     depends_on:
       mysql:
         condition: service_healthy
@@ -174,6 +175,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-user-service}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env - see .env.example}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-discovery:8761/eureka/
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:4200}
     depends_on:
       mysql:
         condition: service_healthy

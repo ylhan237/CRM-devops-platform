@@ -11,7 +11,7 @@ import { FieldFilterPipe } from "../../pipes/fieldFilter/field-filter.pipe";
 import { MatIconModule, MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { ToastModule } from 'primeng/toast';
-import { MatDialog, MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 
 @Component({
   selector: 'app-type', // Changed selector to match type
@@ -25,7 +25,8 @@ import { MatDialog, MatDialogRef } from '@angular/material/dialog';
     MatCheckbox,
     FieldFilterPipe,
     MatIconModule,
-    ToastModule
+    ToastModule,
+    MatDialogModule
   ],
   styleUrls: ['./type.component.scss'] // Changed style to match type
 })
