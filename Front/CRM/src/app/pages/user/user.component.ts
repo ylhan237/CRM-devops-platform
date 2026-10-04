@@ -229,7 +229,7 @@ tabs = [
 
   selectTab(index: number, event: Event){
     const target = event.target as HTMLElement;
-    var line = document.querySelector('.line') as HTMLElement;
+    const line = document.querySelector('.line') as HTMLElement;
     line.style.width = target.offsetWidth + 'px';
     line.style.left = target.offsetLeft + 'px';
     this.activeTab = index;

@@ -91,6 +91,30 @@ module.exports = tseslint.config(
   // here is that the tests themselves stay type-checked.
   {
     files: ['**/*.spec.ts'],
+    languageOptions: {
+      // Jasmine's globals. Without this every spec reports describe, it and
+      // expect as undefined, which is a gap in this file rather than a defect
+      // in the tests. It also drowned the real findings: the first pipeline run
+      // printed 699 warnings of which a large share were these three names.
+      globals: {
+        afterAll: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        beforeEach: 'readonly',
+        describe: 'readonly',
+        expect: 'readonly',
+        fail: 'readonly',
+        fdescribe: 'readonly',
+        fit: 'readonly',
+        it: 'readonly',
+        jasmine: 'readonly',
+        pending: 'readonly',
+        spyOn: 'readonly',
+        spyOnProperty: 'readonly',
+        xdescribe: 'readonly',
+        xit: 'readonly',
+      },
+    },
     rules: {
       '@typescript-eslint/no-unused-expressions': 'off',
     },
