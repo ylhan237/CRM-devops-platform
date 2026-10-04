@@ -1,13 +1,15 @@
 # Stage 1: Build
-FROM maven:3.9.6-eclipse-temurin-17 AS build
+FROM --platform=$BUILDPLATFORM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
-COPY pom.xml .
+COPY build-tools/pom.xml /build-tools/pom.xml
+COPY checkstyle.xml /checkstyle.xml
+COPY api-gateway/pom.xml ./pom.xml
 RUN mvn dependency:go-offline -q
-COPY src ./src
+COPY api-gateway/src ./src
 RUN mvn clean package -DskipTests -q
 
 # Stage 2: Run
-FROM eclipse-temurin:17-jre-alpine
+FROM --platform=$TARGETPLATFORM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/api-gateway-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8060

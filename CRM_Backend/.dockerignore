@@ -1,0 +1,47 @@
+# Keep the build context minimal and reproducible.
+#
+# The context is CRM_Backend/ rather than one module, because a module's pom
+# declares build-tools as its parent and Maven needs that parent before it can
+# read the module at all. Seven module level .dockerignore files are therefore
+# replaced by this one.
+#
+# The Dockerfile copies build-tools/pom.xml and the module pom first so that
+# dependency resolution stays cached, then the module sources. Everything below
+# is noise: shipping it wastes context and risks overriding the result of the
+# in-image Maven run.
+
+# Produced inside the image. This is the entry that matters now: the context
+# covers every module, so every target/ directory would otherwise be sent, and
+# they are by far the largest thing in here.
+*/target
+target
+*/bin
+bin
+
+# JVM crash artifacts
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# Version control and tooling
+.git
+.gitignore
+.gitattributes
+.mvn/wrapper/maven-wrapper.jar
+.vscode
+.idea
+*.iml
+
+# Local environment and credentials. Credentials must never reach an image
+# layer, where they survive even if a later stage would not use them.
+.env
+.env.*
+!.env.example
+
+# Runtime data written by a service
+uploads/
+
+# Editor files
+.DS_Store
+Thumbs.db
+*.swp

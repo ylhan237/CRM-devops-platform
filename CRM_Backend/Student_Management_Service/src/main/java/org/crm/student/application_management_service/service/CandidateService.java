@@ -129,7 +129,10 @@ public class CandidateService {
         String currentYear = String.valueOf(LocalDate.now().getYear());
 
         // Get the first 3 letters of the field (e.g., "ENG" for Engineering)
-        String fieldCode = candidate.getField() != null ? candidate.getField().substring(0, 3).toUpperCase() : "UNK";
+        String field = candidate.getField();
+        String fieldCode = field != null && field.length() >= 3
+                ? field.substring(0, 3).toUpperCase()
+                : "UNK";
 
         // Get the candidate count for the same year and field
         int candidateCount = getCandidateCountForYearAndField(currentYear, fieldCode);
@@ -254,4 +257,3 @@ public class CandidateService {
 
 
 }
-

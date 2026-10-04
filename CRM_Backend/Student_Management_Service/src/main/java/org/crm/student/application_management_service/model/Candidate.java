@@ -94,7 +94,9 @@ public class Candidate{
         String currentYear = String.valueOf(LocalDate.now().getYear());
 
         // Use the first three letters of the field (e.g., "ING" for "Engineering")
-        String fieldCode = field != null ? field.substring(0, 3).toUpperCase() : "UNK";
+        String fieldCode = field != null && field.length() >= 3
+                ? field.substring(0, 3).toUpperCase()
+                : "UNK";
 
         // Get the latest candidate number for the same year and field
         int candidateCount = getCandidateCountForYearAndField(currentYear, fieldCode);

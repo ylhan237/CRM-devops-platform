@@ -37,7 +37,8 @@ services:
   # ── Service Discovery (Eureka) ─────────────────────────────────────────────
   service-discovery:
     build:
-      context: ./CRM_Backend/service-discovery
+      context: ./CRM_Backend
+      dockerfile: service-discovery/Dockerfile
     container_name: crm-service-discovery
     restart: unless-stopped
     ports:
@@ -54,7 +55,8 @@ services:
   # ── Auth Service ───────────────────────────────────────────────────────────
   auth-service:
     build:
-      context: ./CRM_Backend/auth-service
+      context: ./CRM_Backend
+      dockerfile: auth-service/Dockerfile
     container_name: crm-auth-service
     restart: unless-stopped
     ports:
@@ -83,7 +85,8 @@ services:
   # ── Student Management Service ─────────────────────────────────────────────
   student-service:
     build:
-      context: ./CRM_Backend/Student_Management_Service
+      context: ./CRM_Backend
+      dockerfile: Student_Management_Service/Dockerfile
     container_name: crm-student-service
     restart: unless-stopped
     ports:
@@ -111,7 +114,8 @@ services:
   # ── Task Management Service ────────────────────────────────────────────────
   task-service:
     build:
-      context: ./CRM_Backend/Task_Management_Service
+      context: ./CRM_Backend
+      dockerfile: Task_Management_Service/Dockerfile
     container_name: crm-task-service
     restart: unless-stopped
     ports:
@@ -132,7 +136,8 @@ services:
   # ── Notification Service ───────────────────────────────────────────────────
   notification-service:
     build:
-      context: ./CRM_Backend/Notification_Service
+      context: ./CRM_Backend
+      dockerfile: Notification_Service/Dockerfile
     container_name: crm-notification-service
     restart: unless-stopped
     ports:
@@ -158,7 +163,8 @@ services:
   # ── Event Management Service ───────────────────────────────────────────────
   event-service:
     build:
-      context: ./CRM_Backend/Event_Management_System
+      context: ./CRM_Backend
+      dockerfile: Event_Management_System/Dockerfile
     container_name: crm-event-service
     restart: unless-stopped
     ports:
@@ -179,7 +185,8 @@ services:
   # ── API Gateway ────────────────────────────────────────────────────────────
   api-gateway:
     build:
-      context: ./CRM_Backend/api-gateway
+      context: ./CRM_Backend
+      dockerfile: api-gateway/Dockerfile
     container_name: crm-api-gateway
     restart: unless-stopped
     ports:
