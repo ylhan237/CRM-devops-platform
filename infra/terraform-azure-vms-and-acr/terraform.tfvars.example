@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored, which is
+# why this file is not: it holds no secret, only the shape of the answer.
+
+# Required. Generate a key with:  ssh-keygen -t ed25519 -C "crm-dev"
+# then paste the whole contents of the .pub file here, starting with ssh-ed25519.
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... crm-dev"
+
+location   = "westeurope"
+name_prefix = "crm"
+vm_size    = "Standard_B2s"
+
+# Narrow this to your own address before applying:
+#   curl -s https://ifconfig.me
+allowed_ssh_source = "0.0.0.0/0"
+
+acr_sku          = "Standard"
+acr_admin_enabled = false
