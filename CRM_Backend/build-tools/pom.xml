@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
+    <groupId>com.crm</groupId>
+    <artifactId>build-tools</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+    <name>build-tools</name>
+    <description>
+        Shared build configuration for the CRM backend modules.
+
+        The seven services are separate Maven projects with no aggregator, so
+        before this pom each one repeated its own versions and its own quality
+        plugin configuration. Seven copies of the same JaCoCo setup is seven
+        places to forget when the threshold moves.
+
+        Two things are centralised here: the plugin versions, and the Java and
+        quality settings every service must agree on. Services inherit
+        spring-boot-starter-parent through this pom, which also settles a
+        divergence: six services were on 3.3.5 and api-gateway alone was on
+        3.1.12.
+
+        This pom produces no artifact and is never deployed.
+    </description>
+
+    <properties>
+        <!--
+          One Java version for the whole backend, and the reason this file
+          exists. Task_Management_Service used to pin source and target to 7,
+          which the JDK 17 compiler rejects outright.
+        -->
+        <java.version>17</java.version>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!--
+          Plugin versions. Pinned here so every service resolves the same one,
+          and so a bump is a single edit.
+        -->
+        <checkstyle.plugin.version>3.3.1</checkstyle.plugin.version>
+        <checkstyle.version>10.17.0</checkstyle.version>
+        <failsafe.plugin.version>3.2.5</failsafe.plugin.version>
+        <jacoco.plugin.version>0.8.12</jacoco.plugin.version>
+        <spotless.plugin.version>2.43.0</spotless.plugin.version>
+        <spotless.version>2.43.0</spotless.version>
+
+        <!--
+          The coverage floor, enforced by the pipeline rather than here.
+
+          It is deliberately not a jacoco:check rule in this pom: a per module
+          check would fail every service that has only a context test, which is
+          most of them, and a threshold that is red on day one teaches everyone
+          to ignore it. The pipeline aggregates the per module reports and
+          compares the total, which is the number the threshold is about.
+        -->
+        <jacoco.line.coverage.minimum>0.30</jacoco.line.coverage.minimum>
+    </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-checkstyle-plugin</artifactId>
+                    <version>${checkstyle.plugin.version}</version>
+                    <dependencies>
+                        <dependency>
+                            <groupId>com.puppycrawl.tools</groupId>
+                            <artifactId>checkstyle</artifactId>
+                            <version>${checkstyle.version}</version>
+                        </dependency>
+                    </dependencies>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${failsafe.plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>com.diffplug.spotless</groupId>
+                    <artifactId>spotless-maven-plugin</artifactId>
+                    <version>${spotless.plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!--
+              The split between unit and integration tests is a naming
+              convention, declared once here so the pipeline does not have to
+              guess: a class named *Test is a unit test and runs in every build,
+              a class named *IT needs a real service and only runs when the
+              pipeline asks for it.
+
+              Surefire therefore excludes *IT. Without that exclusion an
+              integration test would start a MySQL container during the unit-test
+              job, on a runner that was meant for something else, and the failure
+              would look like a unit test failure.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+              Checkstyle, bound to validate so a violation fails the build.
+
+              checkstyle/checkstyle.xml would be resolved from this pom's own
+              jar, which a parent pom does not put on its children's classpath.
+              The file therefore lives one directory up, next to this pom, and
+              every service sits exactly one directory below it, so the plain
+              relative path ../checkstyle.xml is correct for all seven.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <configuration>
+                    <configLocation>../checkstyle.xml</configLocation>
+                    <includeTestSourceDirectory>false</includeTestSourceDirectory>
+                    <consoleOutput>true</consoleOutput>
+                    <failOnViolation>true</failOnViolation>
+                    <failsOnError>true</failsOnError>
+                    <logViolationsToConsole>true</logViolationsToConsole>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>checkstyle-check</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+              JaCoCo, bound to prepare-agent so surefire records coverage, then
+              report so the pipeline can read target/site/jacoco/jacoco.xml.
+
+              report runs in verify rather than test so that a module running
+              only `mvn test` still produces a report, which is what the
+              coverage job and any local run need.
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+              Spotless, for formatting only. Checkstyle is not bound to apply,
+              so a violation is reported rather than silently rewritten: a
+              formatter that edits your diff makes a review impossible.
+
+              Run it by hand with `mvn spotless:apply`, from the repository root
+              when several services are touched at once.
+            -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration>
+                    <java>
+                        <includes>
+                            <include>src/main/java/**/*.java</include>
+                            <include>src/test/java/**/*.java</include>
+                        </includes>
+                        <googleJavaFormat>
+                            <style>AOSP</style>
+                        </googleJavaFormat>
+                        <removeUnusedImports/>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
+                    </java>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

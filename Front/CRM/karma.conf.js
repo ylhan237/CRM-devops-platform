@@ -8,9 +8,26 @@
 // run as root or under a user namespace where the Chromium sandbox cannot be
 // initialised. --no-sandbox is only acceptable here because the browser loads
 // nothing but the local bundle.
-process.env.CHROME_BIN = process.env.CHROME_BIN
-  || require('which').sync('chrome', { nothrow: true })
-  || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+//
+// CHROME_BIN is only filled in when it is missing and a known install path
+// exists. The previous version resolved it through require('which'), which is
+// not a declared dependency, and fell back to a hardcoded Windows path that
+// cannot exist on a Linux runner. On GitHub Actions the runner image installs
+// Chrome and sets CHROME_BIN itself, so on Linux nothing is set here and
+// karma-chrome-launcher finds the browser the way it normally does.
+if (!process.env.CHROME_BIN) {
+  const { existsSync } = require('fs');
+
+  const windowsCandidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
+
+  const found = windowsCandidates.find((candidate) => existsSync(candidate));
+  if (found) {
+    process.env.CHROME_BIN = found;
+  }
+}
 
 module.exports = function (config) {
   config.set({
@@ -45,6 +62,10 @@ module.exports = function (config) {
         { type: 'html' },
         { type: 'text-summary' },
         { type: 'lcovonly' },
+        // Read by scripts/check-coverage.mjs. The text and lcov reporters are
+        // for humans; this one is machine readable and gives the totals the
+        // coverage gate compares, without the pipeline having to parse lcov.
+        { type: 'json-summary' },
       ],
     },
 
