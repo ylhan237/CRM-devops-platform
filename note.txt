@@ -1,0 +1,33 @@
+produire une pipeline qui vq permettre de mettre en place une Ci et une CD
+1. maitriser la partie contenerisation avec docker et qui implemanter le build multi stage, teste avec BDD externe donc avant le build on met en place une BDD et pendant le build, l'application va tanter de lancer la BDD
+et ensuite mettre en place des health check (pour le frontend)
+2. on passe maintenant a l'industrialisation avec les github action, on va mettre en place des linter, mettre en place du code coverage, faire des tests unitaires, les tests d'integration et les tests de non regression
+ca c'est pour jute tester l'application sans contenerisation
+
+3. ensuite il y'a la partie buid et ensuit run de l'image, donc dans la partie CI dans les github action on peux lancer un autre conteneur BDD et s'assurer que la connexion passe bien et 
+ensuite faire les tests de certain operation sur notre application pour s'assurer qu'il repond au besoin.
+
+4. ensuite on fait la release donc on met le tag et on publie sois sur notre registre docker soit directement sur github
+
+
+
+5. et enfin on fait le deploiement et pour le deploiement mais attention nous sommes encore a la CIet la on fais se qu'on appel un deploiement minimal, c'est a dire pour voir si l'application est deployable et on va utiliser heroku
+on part sur heroku et on prepare un enreronement et ensuite on publie notre application directement sur heroku avec une BDD a cote
+
+
+on passe maintenant sur la partie infrastructure
+
+6. on va provissionner nos vm avec terraform sur azure et ensuite on va installer tout les package necessaires
+
+7. ensuite on va installer un cluster kubernetes a l'aide de cube ADM et on deploie la stack
+
+8. et ensuite on va ecrire les manifeste kubernetes pour notre application. quelque precision on doit mettre en place des pod linites pour la RAM et le CPU donc la reservation, les liveness, readiness, startup, 
+prob pour s'assurer que l'application est bien disponible ou pas. et ensuite pour le frontend on va utiliser un deployement et pour la BDD on va utiliser un statefullset et ensuite on va s'assurer que tout est securiser avec un certificat 
+pour le service potentiollement de type load balancer qui sera cree pour exposer l'application. 
+
+9. et ensuite on va faire une charthelm pour templatiser le deploiement de notre application. et lorsque ses fait on peut en faire un repo dedier et on fais une release et on publie. les chart peuvent etre publiee parce que github intergre desormais un chart repository
+
+la on est a 3 pipeline: la pipeline pour la partie production de l'image et  publication, la creation de l'infrastructure et la partie kubernetes pour la release des manifestes ou du chart
+
+pour la partie securite du code on peut faire le scan du code comme trivy et pour tester les vul on a owasp
+

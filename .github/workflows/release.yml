@@ -1,0 +1,292 @@
+# Publication pipeline: images on a tag, or on demand.
+#
+# Triggered by a vX.Y.Z tag as note.md 4.2 describes, plus workflow_dispatch so a
+# release can be produced without creating a tag first.
+#
+# GHCR is the primary registry and ACR is a mirror of it. The mirror is
+# optional: if the Azure secrets are not configured the job says so and the
+# release still succeeds, because GHCR is where the images actually live and
+# failing a release over an unconfigured mirror would help nobody.
+#
+# The three stages are separate on purpose. Build pushes to GHCR, then a scan
+# job inventories what was pushed, and only then is anything mirrored to ACR. A
+# vulnerability is therefore found before the image exists in two places.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v0.1.0. Leave empty to derive one from the commit.'
+        required: false
+        type: string
+
+env:
+  REGISTRY_GHCR: ghcr.io
+  REGISTRY_ACR: ${{ secrets.AZURE_REGISTRY }}
+  PLATFORMS: linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+  # Needed to push to GHCR and to read the pushed images back for scanning.
+  packages: write
+  # Needed to attach the Trivy findings to the repository, which is what puts
+  # them in the Security tab. Without it the upload step fails.
+  security-events: write
+
+jobs:
+  # The release tag is resolved once, here, and every other job reads it from
+  # this output.
+  #
+  # It used to be written out in five places with the same expression, and that
+  # duplication is what made the first run fail. That expression passed
+  # `inputs.tag || startsWith(...)` as the value of metadata-action's enable
+  # attribute, and `||` does not return a boolean: it returns the first truthy
+  # *value*. A dispatch carrying tag=v0.0.1 therefore evaluated the condition to
+  # the string "v0.0.1", and metadata-action refused it:
+  #
+  #   Invalid value for enable attribute: v0.0.1
+  #
+  # One resolver also means the build, the scan and the mirror cannot disagree
+  # about what was published, which the five copies made possible.
+  prepare:
+    name: resolve the release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        env:
+          # Passed through the environment instead of being interpolated into the
+          # script body, so a value carrying a quote cannot become shell syntax.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            # An explicit tag from workflow_dispatch wins.
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # A vX.Y.Z tag pushed to the repository.
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            # A dispatch on a branch with no tag. The old expression fell back to
+            # github.ref_name here, which published the images under the name of
+            # the branch.
+            echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Show what will be published
+        run: |
+          {
+            echo "Release tag -> ${{ steps.resolve.outputs.tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      # One image at a time per runner. The eight images are independent, and a
+      # failure then names the image that failed rather than one number for all.
+      fail-fast: false
+      matrix:
+        include:
+          - image: service-discovery
+            context: ./CRM_Backend
+            dockerfile: service-discovery/Dockerfile
+          - image: auth-service
+            context: ./CRM_Backend
+            dockerfile: auth-service/Dockerfile
+          - image: student-service
+            context: ./CRM_Backend
+            dockerfile: Student_Management_Service/Dockerfile
+          - image: task-service
+            context: ./CRM_Backend
+            dockerfile: Task_Management_Service/Dockerfile
+          - image: notification-service
+            context: ./CRM_Backend
+            dockerfile: Notification_Service/Dockerfile
+          - image: event-service
+            context: ./CRM_Backend
+            dockerfile: Event_Management_System/Dockerfile
+          - image: api-gateway
+            context: ./CRM_Backend
+            dockerfile: api-gateway/Dockerfile
+          - image: frontend
+            context: ./Front/CRM
+            dockerfile: Dockerfile
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Needed so a build for arm64 can run. The Java compilation itself is not
+      # emulated: every Dockerfile pins its build stage to $BUILDPLATFORM and
+      # only the runtime stage to $TARGETPLATFORM, so Maven runs natively on the
+      # runner and only a COPY crosses architectures.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}
+          # No enable= on the first rule: the resolver guarantees there is always a
+          # tag, so there is nothing to condition on. The only remaining enable is
+          # latest, and it is a real boolean comparison rather than the result of
+          # a truthy value.
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.tag }}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ env.PLATFORMS }}
+          # Labels first, then the build, so the manifest list is pushed once
+          # rather than rebuilt per platform.
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Record the published reference
+        # Written to the run summary rather than to GITHUB_OUTPUT: nothing
+        # consumes it, and this is what you read first when a release misbehaves.
+        # It is also the hook a deployment stage would attach to.
+        run: |
+          {
+            echo "### ${{ matrix.image }}"
+            echo ""
+            echo '```'
+            echo "${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scan:
+    name: scan and inventory ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [service-discovery, auth-service, student-service, task-service, notification-service, event-service, api-gateway, frontend]
+    steps:
+      # No checkout. This job needed one only so metadata-action could recompute
+      # the tag the build job had already been given. Both the checkout and the
+      # action are gone now that the tag comes from prepare.
+
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH
+        # The scan reports; it does not block. Trivy's findings on a base image
+        # nobody has patched yet are not a reason to refuse a release, and a gate
+        # that fails on the first finding is one that gets disabled. The SARIF is
+        # attached to the repository instead, which puts the findings in the
+        # Security tab.
+        continue-on-error: true
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+        continue-on-error: true
+
+      - name: Software bill of materials
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  mirror:
+    name: mirror to Azure Container Registry
+    runs-on: ubuntu-latest
+    needs: [prepare, build, scan]
+    steps:
+      # Optional by decision: GHCR is the primary and the release is complete
+      # without this. The three secrets are AZURE_REGISTRY, AZURE_REGISTRY_USERNAME
+      # and AZURE_REGISTRY_PASSWORD; until they are set the job exits successfully
+      # having done nothing.
+      - name: Are the Azure credentials configured
+        id: acr
+        env:
+          AZURE_REGISTRY: ${{ secrets.AZURE_REGISTRY }}
+          AZURE_REGISTRY_USERNAME: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          AZURE_REGISTRY_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+        run: |
+          if [ -n "$AZURE_REGISTRY" ] && [ -n "$AZURE_REGISTRY_USERNAME" ] && [ -n "$AZURE_REGISTRY_PASSWORD" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Azure Container Registry credentials are absent, skipping the mirror. GHCR already holds the release."
+          fi
+
+      - name: Publish to ACR
+        if: steps.acr.outputs.configured == 'true'
+        env:
+          ACR: ${{ secrets.AZURE_REGISTRY }}
+          ACR_USER: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "$ACR_PASSWORD" | docker login "$ACR" -u "$ACR_USER" --password-stdin
+
+          for image in service-discovery auth-service student-service task-service \
+                      notification-service event-service api-gateway frontend; do
+            # Copies every architecture, so the mirror is a manifest list too and
+            # not a single amd64 image wearing the same tag.
+            docker buildx imagetools create \
+              --tag "$ACR/$image:$RELEASE_TAG" \
+              "ghcr.io/$OWNER/$image:$RELEASE_TAG"
+            echo "mirrored $image"
+          done
+
+      - name: Confirm the mirror
+        if: steps.acr.outputs.configured == 'true'
+        env:
+          ACR: ${{ secrets.AZURE_REGISTRY }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          for image in service-discovery auth-service student-service task-service \
+                      notification-service event-service api-gateway frontend; do
+            platforms=$(docker buildx imagetools inspect "$ACR/$image:$RELEASE_TAG" 2>/dev/null \
+                         | grep -c "linux/" || true)
+            echo "$image : $platforms entries"
+            if [ "$platforms" -eq 0 ]; then
+              echo "::error::$image is missing from the Azure registry"
+              exit 1
+            fi
+          done

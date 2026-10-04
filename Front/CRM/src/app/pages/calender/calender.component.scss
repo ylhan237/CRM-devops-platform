@@ -1,0 +1,20 @@
+/*
+ * Syncfusion theme for the schedule component only.
+ *
+ * These nine stylesheets used to be imported from the global styles.scss, which
+ * put all of them in the initial bundle even though <ejs-schedule> is the only
+ * Syncfusion widget the application uses. Scoping them to the calendar
+ * component keeps them in the lazily loaded calendar chunk.
+ *
+ * Paths are relative rather than bare specifiers: the Angular compiler does not
+ * resolve scoped package specifiers inside a component stylesheet.
+ */
+@import '../../../../node_modules/@syncfusion/ej2-base/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-buttons/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-calendars/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-dropdowns/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-inputs/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-lists/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-popups/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-navigations/styles/material.css';
+@import '../../../../node_modules/@syncfusion/ej2-angular-schedule/styles/material.css';

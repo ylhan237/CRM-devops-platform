@@ -1,0 +1,14 @@
+# Build output and dependencies: not ours to format, and rewriting them would
+# make the next build produce a diff nobody wrote.
+dist/
+coverage/
+.angular/
+node_modules/
+
+# Lockfiles are generated. Prettier rewriting package-lock.json would fight npm.
+package-lock.json
+
+# Minified or generated assets.
+*.min.js
+*.min.css
+*.map

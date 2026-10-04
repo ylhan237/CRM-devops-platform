@@ -1,0 +1,38 @@
+spring:
+  config:
+    import: "optional:file:.env[.properties],optional:file:../../.env[.properties]"
+
+  application:
+    name: notification-service
+
+
+  eureka:
+    client:
+      serviceUrl:
+        defaultZone: http://localhost:8761/eureka/
+
+  management:
+    tracing:
+      sampling:
+        probability: 1.0
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail.smtp.ssl.trust: smtp.gmail.com
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 3000
+      mail.smtp.writetimeout: 5000
+
+  twilio:
+    accountSid: ${TWILIO_ACCOUNT_SID}
+    authToken: ${TWILIO_AUTH_TOKEN}
+    phoneNumber: ${TWILIO_PHONE_NUMBER}
+
+server:
+  port: 8085
