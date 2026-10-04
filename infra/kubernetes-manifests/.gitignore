@@ -1,0 +1,7 @@
+# Real credentials, never committed. The examples beside them are.
+crm-secrets.yaml
+crm-secrets.env
+tls.crt
+tls.key
+*.key
+*.crt

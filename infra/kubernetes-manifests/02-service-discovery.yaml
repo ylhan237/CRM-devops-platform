@@ -1,0 +1,70 @@
+# The service registry, first because every other service registers against it.
+#
+# It is a Deployment with a single replica, which is what a lab needs. It has no
+# PersistentVolumeClaim because Eureka keeps its registry in memory; losing it
+# only means the services re-register.
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-discovery
+  namespace: crm
+  labels:
+    app: service-discovery
+spec:
+  type: ClusterIP
+  selector:
+    app: service-discovery
+  ports:
+    - name: http
+      port: 8761
+      targetPort: 8761
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-discovery
+  namespace: crm
+  labels:
+    app: service-discovery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-discovery
+  template:
+    metadata:
+      labels:
+        app: service-discovery
+    spec:
+      containers:
+        - name: service-discovery
+          image: ghcr.io/ylhan237/service-discovery:latest
+          ports:
+            - containerPort: 8761
+          env:
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              # The in-cluster Service name. This is the one URL that cannot be
+              # an environment variable pointing outside, because the registry is
+              # inside the cluster.
+              value: http://service-discovery:8761/eureka/
+            - name: EUREKA_INSTANCE_HOSTNAME
+              value: service-discovery
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi

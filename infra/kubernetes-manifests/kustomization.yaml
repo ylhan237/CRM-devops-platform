@@ -1,0 +1,70 @@
+# One entry point for the whole stack.
+#
+#   kubectl apply -k infra/kubernetes-manifests/
+#
+# rather than a directory of files, because kustomize resolves the ordering from
+# the file names above and would otherwise depend on kubectl's alphabetical
+# behaviour for the Namespace to exist before the namespaced objects are created.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: crm
+
+commonLabels:
+  app.kubernetes.io/part-of: crm
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - 00-namespace.yaml
+  - 01-mysql.yaml
+  - 02-service-discovery.yaml
+  - 03-auth-service.yaml
+  - 04-student-service.yaml
+  - 05-task-service.yaml
+  - 06-notification-service.yaml
+  - 07-event-service.yaml
+  - 08-api-gateway.yaml
+  - 09-frontend.yaml
+  - 10-ingress.yaml
+  - 11-configmap.yaml
+
+# No secretGenerator on purpose.
+#
+# A kustomize secretGenerator reads its values from a file in the tree, which
+# means a real file of credentials sitting next to the code, one `git add .` away
+# from being published. The secret is created instead, by hand, outside the tree:
+#
+#   kubectl -n crm create secret generic crm-secrets \
+#     --from-literal=jwt-secret-key="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")" \
+#     --from-literal=db-username=... \
+#     --from-literal=db-password=... \
+#     --from-literal=mysql-root-password=... \
+#     --from-literal=mysql-database=authdb \
+#     --from-literal=mysql-user=... \
+#     --from-literal=mysql-password=... \
+#     --from-literal=mail-username=... \
+#     --from-literal=mail-password=...
+#
+# Until it exists the pods stay Pending with a missing secret named in the
+# event, which says more than an apply failure would.
+
+images:
+  # The release workflow publishes under the repository owner, so the tag follows
+  # the branch rather than being pinned. For a repeatable deployment, replace
+  # latest with the release tag.
+  - name: ghcr.io/ylhan237/service-discovery
+    newTag: latest
+  - name: ghcr.io/ylhan237/auth-service
+    newTag: latest
+  - name: ghcr.io/ylhan237/student-service
+    newTag: latest
+  - name: ghcr.io/ylhan237/task-service
+    newTag: latest
+  - name: ghcr.io/ylhan237/notification-service
+    newTag: latest
+  - name: ghcr.io/ylhan237/event-service
+    newTag: latest
+  - name: ghcr.io/ylhan237/api-gateway
+    newTag: latest
+  - name: ghcr.io/ylhan237/frontend
+    newTag: latest
