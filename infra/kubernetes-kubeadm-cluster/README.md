@@ -86,9 +86,24 @@ file contains a quote or a backslash anywhere, including in a comment. It is
 assembled by a JSON encoder now.
 
 **No cluster was created.** Everything here is checked as far as it can be without
-a machine: the script refuses to run if `python3`, `kubeadm` or Docker is missing,
-and it verifies the containerd configuration and the CIDR overlap, but
-`kubeadm init` itself has not run and no pod has been scheduled.
+a machine: the script refuses to run if `kubeadm` or Docker is missing, it verifies
+the containerd configuration and the CIDR overlap, and it fetches both pinned
+download URLs before doing anything, so a tag that does not exist fails in the first
+minute rather than halfway through a running control plane. But `kubeadm init`
+itself has not run and no pod has been scheduled.
+
+Two of the three pinned versions were wrong the first time and were caught by
+fetching the URLs rather than by reading the script:
+
+| Asset | First attempt | Actual |
+|---|---|---|
+| local-path-provisioner | `v4.45.0` → **404** | `v0.0.37` |
+| flannel | `v0.26.1` → 200 but three minors behind | `v0.28.9` |
+| Kubernetes | `v1.31.4` → valid but ten patches behind | `v1.31.14` |
+
+`local-path-provisioner` is versioned `0.0.x` and publishes its manifests under
+`deploy/`, which is what its Helm chart is not for. A `v4.x` tag does not exist. All
+three corrected URLs were then fetched and return 200 with parseable Kubernetes YAML.
 
 ## Growing beyond one machine
 

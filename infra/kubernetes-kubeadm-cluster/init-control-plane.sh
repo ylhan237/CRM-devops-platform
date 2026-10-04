@@ -22,7 +22,7 @@ KUBELET_CONFIG="${SCRIPT_DIR}/kubelet-config.yaml"
 # at the prompt is a value that gets typed wrong.
 PRIVATE_IP="$(ip -4 -o route get 1.1.1.1 | awk '{print $7; exit}')"
 PUBLIC_IP="${CRM_PUBLIC_IP:-}"
-KUBERNETES_VERSION="v1.31.4"
+KUBERNETES_VERSION="v1.31.14"
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[avertissement] %s\033[0m\n' "$*"; }
@@ -73,6 +73,28 @@ if swapon --show --noheadings | grep -q .; then
 else
   log "aucun swap actif"
 fi
+
+log "Verification des URL de telechargement"
+# Checked before kubeadm init, not after. A 404 on a pinned asset fails at the point of
+# use, which is after the control plane is running and halfway through tearing it down
+# again. Two of these three versions were wrong when this script was first written:
+# local-path-provisioner turned out to be versioned 0.0.x and not 4.x, which 404s, and
+# flannel's current release was three minors ahead of the tag that had been assumed.
+# A version that does not exist is a silent failure until it is not.
+FLANNEL_URL="https://github.com/flannel-io/flannel/releases/download/${FLANNEL_VERSION}/kube-flannel.yml"
+STORAGE_URL="https://raw.githubusercontent.com/rancher/local-path-provisioner/${STORAGE_VERSION}/deploy/local-path-storage.yaml"
+
+for url in "${FLANNEL_URL}" "${STORAGE_URL}"; do
+  code="$(curl -fsS -o /dev/null -w '%{http_code}' -L --max-time 30 "${url}" 2>/dev/null || echo 000)"
+  if [ "${code}" != "200" ]; then
+    die "URL introuvable (HTTP ${code}) :
+  ${url}
+  Le tag epingle n'existe probablement pas. Le corriger, ou prendre le dernier tag :
+    gh api repos/rancher/local-path-provisioner/tags --jq '.[].name' | head -3
+    gh api repos/flannel-io/flannel/releases --jq '.[].tag_name' | head -3"
+  fi
+  log "  200 ${url}"
+done
 
 log "Verification des adresses"
 log "  adresse privee : ${PRIVATE_IP}"
@@ -182,8 +204,10 @@ fi
 # Without a CNI the nodes stay NotReady and `kubectl get nodes` never goes green. This
 # is the single most common "kubeadm looks broken" moment, and it is not broken.
 log "Installation du CNI (flannel, le plus proche des valeurs par defaut du projet)"
-FLANNEL_VERSION="v0.26.1"
-curl -fsSL "https://github.com/flannel-io/flannel/releases/download/${FLANNEL_VERSION}/kube-flannel.yml" \
+# v0.28.9 is the current release and its kube-flannel.yml asset is published on the
+# release, not on a branch.
+FLANNEL_VERSION="v0.28.9"
+curl -fsSL "${FLANNEL_URL}" \
   -o /tmp/kube-flannel.yml
 kubectl apply -f /tmp/kube-flannel.yml
 
@@ -204,8 +228,11 @@ done
 # kubeadm documentation names no provisioner, which is deliberate: a storage backend is
 # a choice an operator makes, not something a cluster silently defaults to.
 log "Installation du provisioner local-path (stockage local, une seule machine)"
-STORAGE_VERSION="v4.45.0"
-curl -fsSL "https://raw.githubusercontent.com/rancher/local-path-provisioner/${STORAGE_VERSION}/deploy/local-path-storage.yaml" \
+# v0.0.37, and the zero matters: local-path-provisioner is versioned 0.0.x and the
+# manifests it publishes are not what its Helm chart is for. A v4.x tag does not exist
+# and the URL 404s, which is what happened the first time this was written.
+STORAGE_VERSION="v0.0.37"
+curl -fsSL "${STORAGE_URL}" \
   -o /tmp/local-path-storage.yaml
 kubectl apply -f /tmp/local-path-storage.yaml
 
