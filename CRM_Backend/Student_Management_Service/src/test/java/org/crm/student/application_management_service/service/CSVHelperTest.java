@@ -4,6 +4,7 @@ import org.crm.student.application_management_service.model.Candidate;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -12,6 +13,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class CSVHelperTest {
+
+    @Test
+    void bundledSampleMapsNestedDetails() throws Exception {
+        CSVHelper helper = new CSVHelper();
+        try (InputStream input = getClass().getResourceAsStream("/candidate.csv")) {
+            assertNotNull(input);
+
+            List<Candidate> candidates = helper.parseCSV(input);
+
+            assertEquals(1, candidates.size());
+            Candidate candidate = candidates.get(0);
+            assertNotNull(candidate.getParentDetail());
+            assertEquals("James Brown", candidate.getParentDetail().getFullName());
+            assertEquals("TechCorp", candidate.getEmploymentDetail().getCompanyName());
+            assertEquals("University of Sydney", candidate.getEducationDetail().getInstitutionName());
+            assertEquals(2023, candidate.getEducationDetail().getGraduationYear());
+        }
+    }
 
     @Test
     void parseCSV_shouldMapCandidateAndNestedDetails() throws Exception {

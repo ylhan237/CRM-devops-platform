@@ -4,13 +4,14 @@ import org.crm.student.task_management_service.Service.TaskService;
 import org.crm.student.task_management_service.model.Task;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Optional;
 
- @CrossOrigin(origins = "http://localhost:4200")
+@CrossOrigin(origins = "${CORS_ALLOWED_ORIGIN:http://localhost:4200}")
 @RestController
 @RequestMapping("/tasks")
 public class TaskController {
@@ -23,15 +24,16 @@ public class TaskController {
     }
 
     @PostMapping
-    public ResponseEntity<Task> createTask(@Valid @RequestBody Task task) {
-        Task createdTask = taskService.createTask(task);
+    public ResponseEntity<Task> createTask(
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @Valid @RequestBody Task task) {
+        Task createdTask = taskService.createTask(task, authorization);
         return new ResponseEntity<>(createdTask, HttpStatus.CREATED);
     }
 
     @GetMapping("/candidate/{candidateId}")
-    public ResponseEntity<?> getTasksByCandidateId(@PathVariable String candidateId) {
-        // Logic for getting tasks by candidate ID
-        return ResponseEntity.ok().body("Tasks for candidate " + candidateId);
+    public ResponseEntity<List<Task>> getTasksByCandidateId(@PathVariable String candidateId) {
+        return ResponseEntity.ok(taskService.getTasksByCandidateId(candidateId));
     }
 
     @GetMapping("/status/{status}")
@@ -41,8 +43,11 @@ public class TaskController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Task> updateTask(@PathVariable Long id, @Valid @RequestBody Task updatedTask) {
-        return taskService.updateTask(id, updatedTask)
+    public ResponseEntity<Task> updateTask(
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @PathVariable Long id,
+            @Valid @RequestBody Task updatedTask) {
+        return taskService.updateTask(id, updatedTask, authorization)
                 .map(task -> new ResponseEntity<>(task, HttpStatus.OK))
                 .orElse(new ResponseEntity<>(HttpStatus.NOT_FOUND));
     }

@@ -6,7 +6,7 @@ import { Pipe, PipeTransform } from '@angular/core';
 })
 export class FieldFilterPipe implements PipeTransform {
   transform(users: any[], fieldName: string | null = null, filterValue: string | null = null, isAscending: boolean = true): any[] {
-    let filteredUsers: any[] = users;
+    let filteredUsers: any[] = [...users];
 
     if (fieldName && !filterValue) {
       let sortableField: string = fieldName.toLowerCase();

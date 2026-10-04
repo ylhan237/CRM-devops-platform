@@ -1,6 +1,10 @@
 package org.crm.student.task_management_service.Service;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -21,10 +25,17 @@ public class UserClient {
         this.restTemplate = restTemplate;
     }
 
-    public boolean validateUser(String username) {
+    public boolean validateUser(String username, String authorization) {
         String url = apiGatewayUrl + "/api/v1/auth/" + username + "/exists";
         try {
-            return restTemplate.getForObject(url, Boolean.class);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.AUTHORIZATION, authorization);
+            ResponseEntity<Boolean> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Boolean.class);
+            return Boolean.TRUE.equals(response.getBody());
         } catch (Exception e) {
             throw new RuntimeException("Failed to validate username: " + username, e);
         }

@@ -17,9 +17,9 @@ export class TaskService {
     return this.http.get<any[]>(`${this.baseUrl}`);
   }
 
-  // Get tasks by candidate ID
-  getTasksByCandidateId(candidateId: string): Observable<any[]> {
-    return this.http.get<any[]>(`${this.baseUrl}/${candidateId}`);
+  // Get tasks by candidate full name
+  getTasksByCandidateId(candidateFullName: string): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/candidate/${encodeURIComponent(candidateFullName)}`);
   }
 
   // Get tasks by status

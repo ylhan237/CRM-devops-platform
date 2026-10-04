@@ -68,7 +68,7 @@ public class CandidateController {
     public ResponseEntity<String> deleteCandidate(@PathVariable Integer id) {
         try {
             // First, delete the candidate's profile photo
-            profilePhotoService.deleteProfilePhoto(Long.valueOf(id)); // Assuming `id` is the candidate's ID
+            profilePhotoService.deleteProfilePhoto(id);
 
             // Then, delete the candidate
             candidateService.deleteCandidate(id);
@@ -124,7 +124,7 @@ public class CandidateController {
     }
     @PostMapping("/{candidateId}/upload")
     public ResponseEntity<String> uploadProfilePhoto(
-            @PathVariable Long candidateId,  // Retrieve candidateId from URL path
+            @PathVariable Integer candidateId,
             @RequestParam("file") MultipartFile file) {
         try {
             // Pass the file and candidateId to the service layer for processing
@@ -138,7 +138,7 @@ public class CandidateController {
         }
     }
     @DeleteMapping("/{candidateId}/delete")
-    public ResponseEntity<String> deleteProfilePhoto(@PathVariable Long candidateId) {
+    public ResponseEntity<String> deleteProfilePhoto(@PathVariable Integer candidateId) {
         try {
             profilePhotoService.deleteProfilePhoto(candidateId);
             return ResponseEntity.ok("Profile photo deleted successfully.");
@@ -148,7 +148,7 @@ public class CandidateController {
     }
     @PutMapping("/{candidateId}/update")
     public ResponseEntity<String> updateProfilePhoto(
-            @PathVariable Long candidateId,
+            @PathVariable Integer candidateId,
             @RequestParam("file") MultipartFile file) {
         try {
             profilePhotoService.updateProfilePhoto(file, candidateId);
@@ -160,7 +160,7 @@ public class CandidateController {
         }
     }
     @GetMapping("/{candidateId}/profile-photo")
-    public ResponseEntity<?> getProfilePhoto(@PathVariable Long candidateId) {
+    public ResponseEntity<?> getProfilePhoto(@PathVariable Integer candidateId) {
         Optional<ProfilePhoto> profilePhotoOpt = profilePhotoService.getProfilePhotoByCandidateId(candidateId);
 
         if (profilePhotoOpt.isPresent()) {
@@ -203,7 +203,6 @@ public class CandidateController {
 
 
 }
-
 
 
 

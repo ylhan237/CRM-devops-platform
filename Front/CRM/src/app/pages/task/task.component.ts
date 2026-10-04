@@ -17,7 +17,7 @@ import {TaskService} from "../../services/task/task.service";
 import {TooltipItem} from "chart.js";
 import * as XLSX from 'xlsx';
 // import {AddTaskDialogComponent} from "../add-task-dialog/add-task-dialog.component";
-import {MatDialog, MatDialogRef} from "@angular/material/dialog";
+import {MatDialog, MatDialogModule, MatDialogRef} from "@angular/material/dialog";
 import {HttpClient} from "@angular/common/http";
 import { CandidateServiceService } from '../../services/candidate/candidate-service.service';
 
@@ -35,6 +35,7 @@ import { CandidateServiceService } from '../../services/candidate/candidate-serv
         ConfirmDialogModule,
         ToastModule,
         ButtonModule,
+        MatDialogModule,
         SuccessComponent,
         NgForOf,
         FormsModule,
@@ -357,4 +358,3 @@ export class TaskComponent implements OnInit {
   }
 
 }
-

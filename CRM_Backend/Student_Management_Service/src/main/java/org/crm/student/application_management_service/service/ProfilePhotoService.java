@@ -21,8 +21,8 @@ public class ProfilePhotoService {
     private CandidateRepository candidateRepository;
 
     // Save a new profile photo
-    public ProfilePhoto saveProfilePhoto(MultipartFile file, Long candidateId) throws IOException {
-        Optional<Candidate> candidate = candidateRepository.findById(candidateId); // Use Long here
+    public ProfilePhoto saveProfilePhoto(MultipartFile file, Integer candidateId) throws IOException {
+        Optional<Candidate> candidate = candidateRepository.findById(candidateId);
         if (candidate.isPresent()) {
             ProfilePhoto profilePhoto = new ProfilePhoto();
             profilePhoto.setCandidate(candidate.get());
@@ -34,13 +34,13 @@ public class ProfilePhotoService {
     }
 
     // Get the profile photo by candidate ID
-    public Optional<ProfilePhoto> getProfilePhotoByCandidateId(Long candidateId) {
-        return profilePhotoRepository.findByCandidateId(candidateId); // Use Long here
+    public Optional<ProfilePhoto> getProfilePhotoByCandidateId(Integer candidateId) {
+        return profilePhotoRepository.findByCandidateId(candidateId);
     }
 
     // Update an existing profile photo for a candidate
-    public ProfilePhoto updateProfilePhoto(MultipartFile file, Long candidateId) throws IOException {
-        Optional<Candidate> candidate = candidateRepository.findById(candidateId); // Use Long here
+    public ProfilePhoto updateProfilePhoto(MultipartFile file, Integer candidateId) throws IOException {
+        Optional<Candidate> candidate = candidateRepository.findById(candidateId);
 
         if (candidate.isPresent()) {
             Optional<ProfilePhoto> existingPhoto = profilePhotoRepository.findByCandidateId(candidateId);
@@ -62,7 +62,7 @@ public class ProfilePhotoService {
     }
 
     // Delete a profile photo by candidate ID
-    public void deleteProfilePhoto(Long candidateId) {
+    public void deleteProfilePhoto(Integer candidateId) {
         Optional<ProfilePhoto> profilePhoto = profilePhotoRepository.findByCandidateId(candidateId);
         profilePhoto.ifPresent(photo -> profilePhotoRepository.delete(photo));
     }

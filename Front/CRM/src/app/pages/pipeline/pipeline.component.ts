@@ -1,7 +1,7 @@
 // pipeline.component.ts
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, ViewChild, TemplateRef } from '@angular/core';
-import { MatDialog, MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatIconModule, MatIconRegistry } from '@angular/material/icon';
 import { DropdownModule } from 'primeng/dropdown';
@@ -19,7 +19,7 @@ import { Router } from '@angular/router';
 @Component({
   selector: 'app-pipeline',
   standalone: true,
-  imports: [MatBadgeModule, MatIconModule, CommonModule, DropdownModule, DragDropModule,ToastModule, RouterModule],
+  imports: [MatBadgeModule, MatIconModule, MatDialogModule, CommonModule, DropdownModule, DragDropModule,ToastModule, RouterModule],
   templateUrl: './pipeline.component.html',
   styleUrls: ['./pipeline.component.scss'],
   providers: [MessageService]

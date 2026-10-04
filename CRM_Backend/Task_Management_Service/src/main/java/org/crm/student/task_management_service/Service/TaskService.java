@@ -5,6 +5,10 @@ import org.crm.student.task_management_service.model.EmailNotificationRequest;
 import org.crm.student.task_management_service.model.Task;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -48,17 +52,19 @@ public class TaskService {
         this.userClient = userClient;
     }
 
-    public Task createTask(Task task) {
+    public Task createTask(Task task, String authorization) {
 
 
         // Validate assignedTo user
-        boolean isUserValid = userClient.validateUser(task.getAssignedTo());
+        boolean isUserValid = userClient.validateUser(task.getAssignedTo(), authorization);
 
         if (!isUserValid) {
             throw new IllegalArgumentException("Invalid assignedTo: " + task.getAssignedTo());
         }
 
-        if (!"no association".equals(task.getCandidateFullname())) {
+        if (task.getCandidateFullname() != null
+                && !task.getCandidateFullname().isBlank()
+                && !"no association".equalsIgnoreCase(task.getCandidateFullname())) {
             boolean isCandidateValid = candidateClient.validateCandidate(task.getCandidateFullname());
 
             if (!isCandidateValid) {
@@ -66,10 +72,8 @@ public class TaskService {
             }
         }
 
-        // Save the task
+        task.setAssignedToEmail(getAssignedToEmail(task.getAssignedTo(), authorization));
         Task savedTask = taskRepository.save(task);
-        String assignedToEmail = getAssignedToEmail(task.getAssignedTo());
-        task.setAssignedToEmail(assignedToEmail);
 
         // Send email notification
         sendEmailNotification(savedTask);
@@ -77,10 +81,17 @@ public class TaskService {
         return savedTask;
     }
 
-    private String getAssignedToEmail(String assignedTo) {
+    private String getAssignedToEmail(String assignedTo, String authorization) {
         // Construct the URL to fetch the email
         String url = apiGatewayUrl + "/api/v1/auth/" + assignedTo + "/email";
-        return restTemplate.getForObject(url, String.class);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.AUTHORIZATION, authorization);
+        ResponseEntity<String> response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                String.class);
+        return response.getBody();
     }
 
     private void sendEmailNotification(Task task) {
@@ -117,10 +128,19 @@ public class TaskService {
         return taskRepository.findByStatus(status);
     }
 
-    public Optional<Task> updateTask(Long id, Task updatedTask) {
+    public Optional<Task> updateTask(Long id, Task updatedTask, String authorization) {
         return taskRepository.findById(id).map(task -> {
             if (updatedTask.isCompleted() && LocalDate.now().isAfter(task.getDeadline())) {
                 throw new IllegalStateException("Task cannot be marked as completed because the deadline has passed.");
+            }
+
+            String updatedAssignee = updatedTask.getAssignedTo();
+            if (updatedAssignee != null && !updatedAssignee.equals(task.getAssignedTo())) {
+                if (!userClient.validateUser(updatedAssignee, authorization)) {
+                    throw new IllegalArgumentException("Invalid assignedTo: " + updatedAssignee);
+                }
+                task.setAssignedTo(updatedAssignee);
+                task.setAssignedToEmail(getAssignedToEmail(updatedAssignee, authorization));
             }
 
             // Update task fields
@@ -128,7 +148,6 @@ public class TaskService {
             task.setType(updatedTask.getType());
             task.setDeadline(updatedTask.getDeadline());
             task.setPriority(updatedTask.getPriority());
-            task.setAssignedTo(updatedTask.getAssignedTo());
             task.setStatus(updatedTask.getStatus());
             task.setCompleted(updatedTask.isCompleted());
 
@@ -152,9 +171,6 @@ public class TaskService {
 
             task.setStatus(Task.Status.COMPLETED);
             task.setCompleted(true);
-
-            String assignedToEmail = getAssignedToEmail(task.getAssignedTo());
-            task.setAssignedToEmail(assignedToEmail);
 
             // Send completion email notification
             sendCompletionEmailNotification(task);

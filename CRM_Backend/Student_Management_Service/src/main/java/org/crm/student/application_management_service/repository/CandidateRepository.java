@@ -15,5 +15,4 @@ public interface CandidateRepository extends JpaRepository<Candidate, Integer> {
     boolean existsByFirstNameAndLastName(String firstName, String lastName);
     int countByCandidateIdStartingWith(String candidateIdPrefix);
 
-    Optional<Candidate> findById(Long candidateId);
 }
