@@ -57,7 +57,9 @@ env:
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "false"
   STATE_RESOURCE_GROUP: crm-state
-  STATE_STORAGE_ACCOUNT: crmtfstate
+  # Azure storage account names are global. The immutable GitHub repository ID
+  # makes this name stable for this repository and unique across repositories.
+  STATE_STORAGE_ACCOUNT: crmtf${{ github.repository_id }}
   STATE_CONTAINER: tfstate
 
 jobs:

@@ -178,9 +178,10 @@ Le backend est `azurerm` avec des valeurs vides, fournies à l'init :
 
 ```bash
 cd infra/terraform-azure-vms-and-acr
+ACCOUNT="crmtf$(gh api repos/ylhan237/CRM-devops-platform --jq .id)"
 terraform init \
   -backend-config="resource_group=crm-state" \
-  -backend-config="storage_account_name=crmtfstate" \
+  -backend-config="storage_account_name=${ACCOUNT}" \
   -backend-config="container_name=tfstate" \
   -backend-config="key=access_key" \
   -backend-config="use_azuread_auth=true"
@@ -190,6 +191,9 @@ terraform state list
 ```
 
 `tfvars` reste utile en local pour itérer sans déclencher la pipeline.
+Le nom du compte de stockage combine `crmtf` avec l'ID immuable du dépôt GitHub :
+Azure exige que ce nom soit unique à l'échelle mondiale. La pipeline crée ce même
+compte dans `crm-state`.
 
 ## Si quelque chose se passe mal
 
