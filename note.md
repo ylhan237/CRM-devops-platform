@@ -291,28 +291,78 @@ allow_deletions: false
 | `chore/fix-blocking-build-issues` | `48997d2` | n°5 `"crm": "file:"`, n°15 `<source>7</source>`, n°19 budgets Angular, n°20 alignement `service-discovery`, n°21 scope Lombok | `npm ci` : 1002 paquets exit 0 · `npm run build` : `dist/crm/browser` émis · `service-discovery` 2/2 tests verts · `TaskServiceTest` 2/2 vert · les 2 JARs portent les noms attendus par leurs Dockerfiles |
 | `perf/add-lazy-loading` | `4912fa5` | n°22 build déterministe, n°23 bundle initial | `initial` **6,81 Mo → 1,51 Mo** (−78 %) · 57 fichiers JS au lieu de 9 · 8 chunks lazy nommés · `tsc -p tsconfig.spec.json` : aucune nouvelle erreur |
 
+### Vague 1 — les 18 défauts S1
+
+Tous corrigés, chacun vérifié par exécution et non par relecture. Les quatre
+sécurité ont été traités en priorité.
+
+| Branche | Défauts | Preuve |
+|---|---|---|
+| `fix/security-password-json-exposure` | `password` et `passwordResetToken` exposés en JSON | `@JsonIgnore` + test d'absence du champ dans la réponse |
+| `fix/candidate-profile-photo-json-recursion` | récursion infinie `Candidate ↔ ProfilePhoto` | annotations Jackson + sérialisation vérifiée |
+| `fix/api-broken-delete-endpoints` | 2 endpoints DELETE inatteignables, `GET /pipeline` absent | tests sur les 3 endpoints |
+| `fix/email-template-casing-and-url-typos` | `ACTIVATE_ACCOUNT` non résolu, URLs `avtivate-account` / `resertUrl` | e-mail rendu et vérifié |
+| `fix/frontend-auth-router-and-duplicate-provider` | `router` non injecté, `provideAnimationsAsync()` dupliqué | 49 specs Angular vertes |
+| `fix/security-photo-upload-idor-and-email-enumeration` | **IDOR** sur l'upload de photo, énumération de comptes | **16 tests** dans `ProfilePhotoAuthorizationTest`, cas négatifs inclus |
+
+### Vague 3 — la chaîne de qualité
+
+| Branche | Contenu | Preuve |
+|---|---|---|
+| `ci/add-eslint-and-prettier` | ESLint + `@angular-eslint` + Prettier + Checkstyle + Spotless | **11 règles bloquantes, 0 violation** · 5 en warning, 110 violations, aucune n'étant un défaut |
+| `ci/add-github-actions-pipeline` | `ci.yml`, 5 jobs parallèles + gate | **6/6 verts**, run `37203518006`, après 3 itérations |
+| `ci/add-code-coverage-gate` | JaCoCo + Istanbul + `scripts/check-coverage.mjs` | backend mesuré **20,40 %**, plancher **0,18**, crémaillère 0,18 → 0,25 → 0,30 · frontend **33,22 %**, garde **0,30** |
+| `test/isolate-context-loads-with-testcontainers` | MySQL 8 par Testcontainers + WireMock pour Eureka | les 4 `contextLoads()` passent sur runner Linux |
+
+**102 tests verts** : 53 backend répartis sur 7 modules, 49 specs Angular.
+
+### Vague 4 — infrastructure
+
+Aucune de ces quatre n'a été appliquée. Le plan Terraform, lui, a été exécuté
+contre l'abonnement réel, ce qui a prouvé les identifiants et trouvé un défaut.
+
+| Branche | Preuve |
+|---|---|
+| `infra/terraform-azure-vms-and-acr` | `validate` et `fmt` passent · **plan réel exécuté : `8 to add, 0 to change, 0 to destroy`** |
+| `infra/kubernetes-kubeadm-cluster` | 4 scripts `bash -n` · **17/17** tests de chevauchement CIDR |
+| `infra/add-kubernetes-manifests` | `kubectl kustomize` rend 22 documents · 16 clés de config toutes déclarées |
+| `infra/add-helm-chart` | `helm lint` passe · rendu de 21 documents, 2 garde-fou `fail` testés |
+
 ## 5.2 Reste à faire
 
-Ordre imposé par les dépendances : la vague 0 avant tout le reste, puis la
-vague 1 applicative, puis la vague 2 de tests, et seulement ensuite la vague 3
-de CI. Écrire la pipeline avant d'avoir réparé les tests rendrait impossible de
-distinguer « ma CI est mauvaise » de « le code est cassé ».
+Cette section listait comme « à faire » treize branches qui sont **mergées depuis** :
+les vagues 0, 1 et 3 sont terminées. Ce qui reste réellement est ci-dessous.
 
-| Ordre | Branche | Défauts traités |
+| Vague | Branche | État |
 |---|---|---|
-| 1 | `chore/add-env-example-and-prod-profile` | n°7, n°8, n°11 |
-| 2 | `chore/add-dockerignore` | — |
-| 3 | `fix/config-externalize-java-service-urls` | n°12 |
-| 4 | `fix/config-externalize-angular-urls` | n°13 |
-| 5 | `feat/gateway-route-event-service` | n°14 |
-| 6 | `fix/security-password-json-exposure` | n°2 |
-| 7 | `fix/candidate-profile-photo-json-recursion` | n°1 |
-| 8 | `fix/api-broken-delete-endpoints` | n°3, n°4 |
-| 9 | `fix/email-template-casing-and-url-typos` | n°9, n°10 |
-| 10 | `fix/frontend-auth-router-and-duplicate-provider` | n°17, n°18 |
-| 11 | `test/fix-broken-existing-specs` | n°6 |
-| 12 | `test/isolate-context-loads-with-testcontainers` | n°16 |
-| 13 | `ci/add-github-actions-pipeline` | §2 |
+| 0 — build | 6 branches | ✅ mergées (PR #1 à #7) |
+| 1 — S1 | 6 branches | ✅ mergées (PR #6 à #13) |
+| 2 — tests | `test/fix-broken-existing-specs` | ✅ mergée (PR #9) |
+| 2 — tests | `test/isolate-context-loads-with-testcontainers` | ✅ mergée (PR #11) |
+| 2 — tests | `test/add-unit-tests` | ❌ **non commencée**, §5.5 |
+| 2 — tests | `test/add-contract-and-schema-tests` | ❌ non commencée |
+| 3 — CI/CD | 4 branches | ✅ mergées (PR #12, #14, #15) |
+| 4 — infra | 4 branches | 🟡 écrites et vérifiées, **PR #17 à #20 ouvertes** |
+
+### Ce qui reste réellement
+
+| Priorité | Travail | Pourquoi |
+|---|---|---|
+| 1 | Merger les 5 PR ouvertes (#16 → #20) | tout est écrit et vérifié, rien n'est mergé |
+| 2 | **11 défauts S2** | non commencés |
+| 3 | **11 défauts S3** | non commencés |
+| 4 | `test/add-unit-tests` | le backend est à 20,40 %, la crémaillère vise 0,25 puis 0,30 |
+| 5 | 2 branches amont de sécurité pour Frederic | travail fait et testé, il manque le conditionnement sur sa base |
+| 6 | `terraform apply` | la seule chose qui reste pour que l'infra existe |
+
+### Pourquoi les tests passent à 30 % par paliers
+
+`note.md` §4.3 annonçait un seuil bloquant à 30 %. La mesure dit 20,40 % pour le
+backend. Un seuil à 30 % aurait rendu la CI rouge immédiatement, et une CI rouge
+depuis le premier jour s'apprend à ignorer. Le plancher est donc à **0,18**, juste
+sous la mesure, et la crémaillère le fait monter à 0,25 puis 0,30 à mesure que les
+tests sont ajoutés. Le frontend garde **0,30** : il est déjà à 33,22 %, donc le
+seuil est tenable immédiatement.
 
 ## 5.3 Stratégie de pull request vers l'upstream
 
@@ -329,6 +379,21 @@ fix/email-template-casing-and-url-typos
 fix/frontend-auth-router-and-duplicate-provider
 ```
 
+**Déjà fait** — 6 branches poussées sur notre dépôt et vérifiées sur sa base `eafaeaa`,
+via des branches `upstream/*` :
+
+```
+upstream/fix-api-broken-delete-endpoints
+upstream/fix-candidate-profile-photo-json-recursion
+upstream/fix-email-template-casing-and-url-typos
+upstream/fix-frontend-auth-router-and-duplicate-provider
+upstream/test-runnable-context-tests
+```
+
+Il manque **2 branches de sécurité** : le hash BCrypt exposé et l'IDOR sur l'upload
+de photo. Le travail est fait et testé, il reste à le conditionner sur sa base et
+à rédiger les issues correspondantes.
+
 **À ne pas lui soumettre** — le travail DevOps et les choix de conception :
 
 ```
@@ -337,17 +402,81 @@ les budgets Angular, le lazy loading  choix de conception, pas des bugs
 docker-compose                        son existant, pas une correction
 ```
 
+## 5.3 bis Protection de `main` (§4.4)
+
+Appliquée et relue dans l'API :
+
+| Règle | Valeur |
+|---|---|
+| checks requis | `lint`, `unit-test`, `integration-test`, `non-regression`, `coverage-gate` |
+| `strict` | oui — la branche doit être à jour avec `main` |
+| révisions requises | 1 |
+| `dismiss_stale_reviews` | oui |
+| historique linéaire | oui, compatible avec le squash |
+| force push / suppression | interdits |
+| résolutions de conversation | exigées |
+
+Les cinq noms de checks correspondent **exactement** aux noms de jobs de `ci.yml`,
+ce qui n'était pas garanti et qui est vérifié.
+
+`enforce_admins` est à `false` : sur un dépôt à un seul compte, exiger une revue
+que l'on ne peut pas se donner soi-même bloquerait tous les merges. Un compte admin
+peut contourner.
+
 La méthode la plus simple : chaque branche `fix/*` est poussée sur notre dépôt,
 puis la PR est ouverte en croisant les dépôts, avec `base=Frederic311:main` et
 `head=ylhan237:<branche>`. Aucune réécriture d'historique n'est nécessaire.
 
 ## 5.4 Limites connues de ce document
 
-- `note.md` ne couvre que les sections **1 et 2** de l'énoncé. Les sections 3 à 9
-  (release, Heroku, Terraform, Kubernetes, Helm, sécurité) restent dans `note.txt`
-  et ne sont pas encore rédigées ici.
+- `note.md` couvre les sections **1 à 4** de l'énoncé. La section **5 est
+  abandonnée** : Heroku ne fait plus partie du périmètre, c'est une décision et pas
+  un oubli. Elle reste dans `note.txt` comme trace. Rien dans ce dépôt ne déploie
+  donc plus nulle part : le CD n'a pas de cible tant que l'infra n'est pas
+  appliquée.
 - L'audit s1 a été fait par relecture **et** par exécution, mais la vérification
   fonctionnelle en navigateur n'a pas été faite. Le build vert avec
   `strictTemplates: true` garantit la compilation des templates, pas le rendu.
-- Les 38 fichiers `.spec.ts` sont des stubs générés : la couverture réelle est
-  proche de 0 % et le seuil de 30 % annoncé en §4 reste à instrumenter.
+- La phrase « les 38 fichiers `.spec.ts` sont des stubs, couverture proche de 0 % »
+  **n'est plus vraie**. Mesurée : **33,22 %** sur le frontend, et 49 specs
+  Angular sont vertes. Ils n'étaient plus des stubs.
+- Le seuil de 30 % annoncé en §4 n'est appliqué qu'au frontend. Le backend est à
+  20,40 %, il est à 0,18 pour que la CI soit verte, et §5.2 explique pourquoi.
+
+## 5.5 Ce que la CI a trouvé et la lecture n'avait pas vu
+
+Cinq défauts sont apparus à l'exécution et étaient impossibles à voir à la relecture.
+Le même risque valait pour Terraform, ce qui est pourquoi `validate` et un `plan`
+réel ont été faits plutôt que de se fier à la lecture.
+
+| Défaut | Pourquoi la lecture ne le voyait pas |
+|---|---|
+| `apiServer:` écrit **deux fois** dans le même `ClusterConfiguration` | clé YAML dupliquée : le plan produit la dernière, silencieusement |
+| `volumeClaimTemplates` indenté sous le **pod** au lieu du StatefulSet | rend proprement, rejeté par le serveur de l'API |
+| Deux clés `annotations` dans le même `metadata` d'Ingress | le chart paraissait correct, la limite nginx de 16 Mo disparaissait |
+| Priorities de règles NSG = `200 + port` | produit 6643 et 8961, Azure plafonne à 4096 |
+| `admin_ssh_key_enabled`, argument d'azurerm 2.x | `validate` rejette le fichier entier, la lecture ne dit rien |
+
+Le motif est le même à chaque fois : une valeur plausible, un défaut que rien ne
+signale tant que quelque chose ne l'exécute.
+
+## 5.6 État des secrets GitHub au 5 octobre 2026
+
+| Secret | Présent | Utilisé par |
+|---|---|---|
+| `ARM_SUBSCRIPTION_ID` | ✅ | Terraform — **validé par un plan réel** |
+| `ARM_TENANT_ID` | ✅ | Terraform — validé |
+| `ARM_CLIENT_ID` | ✅ | Terraform — validé |
+| `ARM_CLIENT_SECRET` | ✅ | Terraform — validé |
+| `AZURE_REGISTRY` | ❌ | le miroir ACR de `release.yml` |
+| `AZURE_REGISTRY_USERNAME` | ❌ | le miroir ACR |
+| `AZURE_REGISTRY_PASSWORD` | ❌ | le miroir ACR |
+
+Les trois secrets Azure ne peuvent pas encore être posés : il n'y a pas d'ACR
+auquel s'authentifier puisque aucun `apply` n'a été fait. L'ordre est `apply`,
+puis un principal de service avec le rôle `AcrPush`, puis les secrets.
+
+GitHub ne relit jamais un secret, donc « présent » et « correct » sont deux
+affirmations différentes. C'est ce que `.github/workflows/terraform.yml` vérifie :
+le contrôle de présence nomme les secrets absents, et le `plan` est le seul moyen
+de savoir si les valeurs sont bonnes. Il l'a fait : `8 to add, 0 to change`.
