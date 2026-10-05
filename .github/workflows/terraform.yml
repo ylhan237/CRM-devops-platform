@@ -178,6 +178,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       created: ${{ steps.check.outputs.created }}
+      # Threaded into plan and apply. The state account and the resources have to be
+      # in the same region, and the azurerm backend refuses when they are not. Passing
+      # the resolved value rather than letting each job read the variable independently
+      # is what makes that guarantee hold instead of being a coincidence.
+      location: ${{ steps.region.outputs.location }}
 
     steps:
       - uses: actions/checkout@v7
@@ -186,13 +191,78 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}"}'
 
+      # The subscription carries the Azure policy sys.regionrestriction, which
+      # restricts deployments to a fixed list of regions. Creating anything outside it
+      # fails with RequestDisallowedByAzure and a paragraph about "best available
+      # regions", which reads like a quota problem and is not.
+      #
+      # The regions this subscription may use are germanywestcentral, spaincentral,
+      # italynorth, swedencentral and polandcentral. germanywestcentral is the default
+      # because it is the closest to France of those, and because it is what
+      # variables.tf uses, so the two cannot disagree silently.
+      #
+      # The policy is read and printed rather than trusted, so that if the list
+      # changes the next run says so instead of failing with the same paragraph.
+      - name: Resolve and check the region
+        id: region
+        env:
+          REQUESTED: ${{ vars.AZURE_LOCATION }}
+        run: |
+          set -euo pipefail
+
+          DEFAULT="germanywestcentral"
+
+          echo "### Region"
+          echo ""
+          if az policy assignment show \
+               --name sys.regionrestriction \
+               --output json >/dev/null 2>&1; then
+            allowed="$(az policy assignment show \
+              --name sys.regionrestriction \
+              --query "parameters.listOfAllowedLocations.value" \
+              --output tsv 2>/dev/null | tr -d '\r' || true)"
+            echo "The subscription restricts deployments to:"
+            printf '%s\n' "${allowed}" | sed 's/^/  - /'
+          else
+            allowed=""
+            echo "No sys.regionrestriction assignment found at subscription scope."
+          fi
+
+          if [ -n "${REQUESTED}" ]; then
+            region="${REQUESTED}"
+            source="the repository variable AZURE_LOCATION"
+          else
+            region="${DEFAULT}"
+            source="the built-in default"
+          fi
+
+          # Checked before creating anything. The API error for a forbidden region and
+          # the error for a nonexistent one are both RequestDisallowedByAzure here, so
+          # catching it now turns a paragraph of policy text into one line naming the
+          # permitted set.
+          if [ -n "${allowed}" ] && ! printf '%s\n' "${allowed}" | grep -qx "${region}"; then
+            echo ""
+            echo "::error::${region} is not a region this subscription may deploy to."
+            echo "Permitted:"
+            printf '%s\n' "${allowed}" | sed 's/^/  - /'
+            echo ""
+            echo "Either change the default in infra/terraform-azure-vms-and-acr/variables.tf"
+            echo "or override the region for the pipeline:"
+            echo "  gh variable set AZURE_LOCATION --body <region>"
+            exit 1
+          fi
+
+          echo ""
+          echo "Region: \`${region}\` (from ${source})."
+          echo "location=${region}" >> "${GITHUB_OUTPUT}"
+
       - name: Create the state storage account
         id: check
         env:
           RG: ${{ env.STATE_RESOURCE_GROUP }}
           ACCOUNT: ${{ env.STATE_STORAGE_ACCOUNT }}
           CONTAINER: ${{ env.STATE_CONTAINER }}
-          LOCATION: westeurope
+          LOCATION: ${{ steps.region.outputs.location }}
         run: |
           set -euo pipefail
 
@@ -200,7 +270,7 @@ jobs:
             echo "The state account ${ACCOUNT} already exists."
             echo "created=false" >> "${GITHUB_OUTPUT}"
           else
-            echo "Creating the state resource group and account..."
+            echo "Creating the state resource group and account in ${LOCATION}..."
             az group create --name "${RG}" --location "${LOCATION}" --output none
             az storage account create \
               --name "${ACCOUNT}" \
@@ -236,6 +306,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| resource group | \`${RG}\` |"
+            echo "| location | \`${LOCATION}\` |"
             echo "| storage account | \`${ACCOUNT}\` |"
             echo "| container | \`${CONTAINER}\` |"
             echo "| created now | ${ACCOUNT} |"
@@ -351,6 +422,9 @@ jobs:
           ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
           TF_VAR_ssh_public_key: ${{ vars.TF_VAR_SSH_PUBLIC_KEY }}
+          # The region bootstrap resolved, not a value read again here, so the
+          # resources cannot land somewhere the state account is not.
+          TF_VAR_location: ${{ needs.bootstrap.outputs.location }}
           CONFIRM: ${{ inputs.confirm }}
           DESTROY: ${{ inputs.destroy }}
         run: |

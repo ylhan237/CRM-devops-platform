@@ -5,7 +5,11 @@
 # then paste the whole contents of the .pub file here, starting with ssh-ed25519.
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... crm-dev"
 
-location   = "westeurope"
+# The subscription only allows a fixed set of regions, enforced by the Azure policy
+# sys.regionrestriction. The permitted ones are
+#   germanywestcentral, spaincentral, italynorth, swedencentral, polandcentral
+# Anything else fails with RequestDisallowedByAzure.
+location   = "germanywestcentral"
 name_prefix = "crm"
 vm_size    = "Standard_B2s"
 
