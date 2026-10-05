@@ -453,9 +453,20 @@ jobs:
           # The backend is passed entirely by flag. Nothing about the state location
           # is in the repository, so a fork cannot point this at someone else's
           # storage account.
+          #
+          # The argument is `resource_group_name`, not `resource_group`: the azurerm
+          # backend is built into Terraform rather than shipped by the provider, and
+          # its schema is easy to misremember. Terraform rejects a wrong name with
+          # "Invalid backend configuration argument ... is not expected for the
+          # selected backend type", which names the offending argument but not the
+          # right one.
+          #
+          # `key` is an empty alias for `access_key`. It is harmless alongside
+          # use_azuread_auth: Terraform only falls back to looking the key up when
+          # the key, the sas token and use_azuread_auth are all absent.
           terraform init \
             -input=false -no-color \
-            -backend-config="resource_group=${STATE_RESOURCE_GROUP}" \
+            -backend-config="resource_group_name=${STATE_RESOURCE_GROUP}" \
             -backend-config="storage_account_name=${STATE_STORAGE_ACCOUNT}" \
             -backend-config="container_name=${STATE_CONTAINER}" \
             -backend-config="key=access_key" \
@@ -597,9 +608,11 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
         run: |
           set -euo pipefail
+          # Same backend flags as the plan job, and for the same reason: the
+          # argument is `resource_group_name`. See the plan job for why.
           terraform init \
             -input=false -no-color \
-            -backend-config="resource_group=${STATE_RESOURCE_GROUP}" \
+            -backend-config="resource_group_name=${STATE_RESOURCE_GROUP}" \
             -backend-config="storage_account_name=${STATE_STORAGE_ACCOUNT}" \
             -backend-config="container_name=${STATE_CONTAINER}" \
             -backend-config="key=access_key" \

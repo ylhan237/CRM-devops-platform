@@ -180,7 +180,7 @@ Le backend est `azurerm` avec des valeurs vides, fournies à l'init :
 cd infra/terraform-azure-vms-and-acr
 ACCOUNT="crmtf$(gh api repos/ylhan237/CRM-devops-platform --jq .id)"
 terraform init \
-  -backend-config="resource_group=crm-state" \
+  -backend-config="resource_group_name=crm-state" \
   -backend-config="storage_account_name=${ACCOUNT}" \
   -backend-config="container_name=tfstate" \
   -backend-config="key=access_key" \
