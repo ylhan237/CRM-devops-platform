@@ -139,7 +139,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}
+          images: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}
           # No enable= on the first rule: the resolver guarantees there is always a
           # tag, so there is nothing to condition on. The only remaining enable is
           # latest, and it is a real boolean comparison rather than the result of
@@ -176,7 +176,7 @@ jobs:
             echo "### ${{ matrix.image }}"
             echo ""
             echo '```'
-            echo "${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}"
+            echo "${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -195,7 +195,7 @@ jobs:
 
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          image-ref: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
           format: sarif
           output: trivy-${{ matrix.image }}.sarif
           severity: CRITICAL,HIGH
@@ -215,7 +215,7 @@ jobs:
       - name: Software bill of materials
         uses: anchore/sbom-action@v0.24.3
         with:
-          image: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          image: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
           format: spdx-json
           output-file: sbom-${{ matrix.image }}.spdx.json
         continue-on-error: true
