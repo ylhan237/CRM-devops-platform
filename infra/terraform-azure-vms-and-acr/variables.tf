@@ -1,7 +1,25 @@
 variable "location" {
-  description = "Region everything is created in."
+  description = <<-EOT
+    Region everything is created in.
+
+    germanywestcentral, and not westeurope: the subscription carries an Azure policy
+    named sys.regionrestriction that restricts deployments to a fixed list, and
+    westeurope is not on it. Creating anything there fails with
+
+      RequestDisallowedByAzure ... This policy maintains a set of best available
+      regions where your subscription can deploy resources
+
+    which reads like a quota problem and is not. The regions this subscription may
+    use are
+
+      germanywestcentral   spaincentral   italynorth   swedencentral   polandcentral
+
+    germanywestcentral is the default because it is the closest to France of those
+    five. Change it freely if the policy list changes; it is a variable precisely
+    because that list is not something this repository controls.
+  EOT
   type        = string
-  default     = "westeurope"
+  default     = "germanywestcentral"
 }
 
 variable "name_prefix" {
