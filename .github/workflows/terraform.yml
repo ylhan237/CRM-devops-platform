@@ -1,62 +1,69 @@
-# Terraform: format, validate, plan.
+# Terraform: validate, then — manually — plan and apply.
 #
-# This workflow exists for one reason: the four ARM_* secrets can only be verified by
-# using them. GitHub will not read a secret back, so "the secrets are set" and "the
-# secrets are correct" are different claims, and only `terraform plan` tells you which
-# one is true. It authenticates, it asks Azure what exists, and it fails on a wrong
-# subscription, a wrong tenant, a principal without Contributor, or a typo in a value.
+# There are two paths through this workflow, and they share the first steps only.
 #
-# There is no `apply` here on purpose. Applying from CI means a machine nobody is
-# watching spending money on a virtual machine, and the first apply is the one a person
-# should read.
+# Pull request: fmt, init without a backend, validate. No plan against the real
+# state, and that is deliberate rather than a limitation. Planning a pull request
+# against the production backend would hand every contributor read access to the
+# real inventory, including resource ids and the ACR login server, and would let a
+# pull request author see what a change would destroy before anyone had reviewed it.
+#
+# workflow_dispatch: the same checks, then a plan against the real state, then an
+# apply of *that* plan, gated by an environment that requires a human approval.
+#
+# The apply is manual because the brief asks for an infrastructure pipeline and a
+# manual apply is not one. What it is instead is an apply that a person starts and
+# a person approves, with the plan in between so that what is approved is what
+# runs. Doing it by hand from a laptop was the previous arrangement and it was
+# worse in every way that matters: no trace, no plan attached to the change, and a
+# state file that only exists on one machine.
 
 name: terraform
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "infra/terraform-azure-vms-and-acr/**"
-      - ".github/workflows/terraform.yml"
   pull_request:
     paths:
       - "infra/terraform-azure-vms-and-acr/**"
       - ".github/workflows/terraform.yml"
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: >-
+          Type APPLY to enable the apply job. The environment still requires an
+          approval, so this is not the last gate.
+        required: false
+        type: string
+      destroy:
+        description: >-
+          Set to true to plan a destroy of the whole configuration. Refused unless
+          confirm is also APPLY.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-# Two runs of this workflow on the same configuration would plan against the same state
-# and one of them would be stale by the time it reported. The second waits, then cancels
-# the first, which is what you want for a check.
 concurrency:
   group: terraform-${{ github.ref }}
-  cancel-in-progress: true
+  # Serial rather than cancel-in-progress, and the difference matters here. Two
+  # runs applying at once would race on the state lock, and one would be cancelled
+  # halfway through leaving a resource created and a state file that does not
+  # mention it. Cancelling the earlier run of a *check* is convenient; cancelling
+  # the earlier run of an *apply* is destructive.
+  cancel-in-progress: false
 
 env:
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "false"
-
-  # A throwaway public key, present only so `plan` can run.
-  #
-  # ssh_public_key has no default on purpose: a machine with an authorised key is a
-  # machine someone can log into, and the one thing this configuration must not do is
-  # ship a real key in a repository. With no value at all, plan stops before it reaches
-  # Azure with "No value for required variable", which is the correct refusal and also
-  # means the plan never gets far enough to find out whether the Azure credentials work.
-  #
-  # So the workflow supplies a real, well-formed ed25519 public key that belongs to
-  # nothing: its private half was generated once, never committed, and thrown away. A
-  # public key on its own grants access to no machine. It exists to satisfy the variable
-  # and its validation, and it is what lets the plan authenticate.
-  #
-  # A real deployment needs the operator's own key in terraform.tfvars, which is
-  # gitignored. Nothing here applies anything.
-  TF_VAR_ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQoOEOqe0upcgd/nmn1kX5iEfMF/1aLKj2zjKxS94F7 plan-only-not-a-real-key"
+  STATE_RESOURCE_GROUP: crm-state
+  STATE_STORAGE_ACCOUNT: crmtfstate
+  STATE_CONTAINER: tfstate
 
 jobs:
-  terraform:
+  # -------------------------------------------------------------- pull request ----
+
+  check:
     name: terraform
     runs-on: ubuntu-latest
     defaults:
@@ -67,22 +74,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # The tag is v4. setup-terraform@v3 is what most examples still say, and it is two
-      # majors behind.
+      # The tag is v4. setup-terraform@v3 is what most examples still say, and it is
+      # two majors behind.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.14.8
           terraform_wrapper: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      # Checked before anything touches Azure, so a missing secret names itself instead
-      # of surfacing as an authentication error three steps later that reads like a
-      # credentials problem rather than a missing one.
       - name: Check the Azure credentials are present
         env:
           ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
@@ -104,18 +103,13 @@ jobs:
             echo ""
             echo "They are repository settings, not files. To set them:"
             echo "  gh secret set ARM_SUBSCRIPTION_ID"
-            echo ""
-            echo "Values come from an app registration in Microsoft Entra with the"
-            echo "Contributor role on the subscription. A principal with no role is the"
-            echo "most common reason a first plan fails."
             exit 1
           fi
           echo "All four credentials are present."
           echo ""
-          echo "Present is not correct. The plan below is what proves correct: it"
-          echo "authenticates and asks Azure what exists."
+          echo "Present is not correct. Only the plan on main, or a manual run,"
+          echo "proves correct: it authenticates and asks Azure what exists."
           echo ""
-          echo "The subscription ID is a UUID and the tenant ID is a domain name."
           # Shape only, never the value. A subscription ID that is not a UUID is
           # caught here rather than as an opaque 401 later.
           if ! printf '%s' "${ARM_SUBSCRIPTION_ID}" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
@@ -123,8 +117,8 @@ jobs:
             exit 1
           fi
 
-      # fmt before init: it needs no provider and no network, so a formatting problem is
-      # reported in two seconds instead of after a provider download.
+      # fmt before init: it needs no provider and no network, so a formatting problem
+      # is reported in two seconds instead of after a provider download.
       - name: Check formatting
         run: |
           set -euo pipefail
@@ -136,31 +130,201 @@ jobs:
           fi
           echo "Formatting is clean."
 
-      # A plain init, no -backend=false.
+      # -backend=false on this path only. The state is in a remote backend that only
+      # the manual path has credentials for, and a pull request has no business
+      # reading it.
       #
-      # The first version of this step passed -backend=false on the reasoning that the
-      # backend is local and there is no remote state to fetch. That is true, and it is
-      # exactly why the flag must not be there: -backend=false skips backend
-      # initialisation, and `terraform plan` then refuses to run with "Backend
-      # initialization required". The step was written to avoid a problem it created.
-      #
-      # With a local backend, init writes terraform.tfstate into the workspace, which is
-      # gitignored and thrown away with the runner. Nothing to fetch, nothing to protect.
-      #
-      # No -lockfile=readonly either, deliberately. The lock file is gitignored in this
+      # No -lockfile=readonly, deliberately. The lock file is gitignored in this
       # configuration, so it is absent from the checkout, and readonly explicitly
       # refuses to run without an existing lock file.
       - name: terraform init
-        run: terraform init -input=false -no-color
+        run: terraform init -backend=false -input=false -no-color
 
       - name: terraform validate
         run: terraform validate -no-color
 
-      # -lock=false: the lock file is gitignored here, and a read-only checkout plus a
-      # lock write would fail on the first run.
-      #
-      # This is the step that verifies the secrets. Everything before it only checks the
-      # configuration against the provider schema.
+      - name: Explain what a pull request does not do
+        run: |
+          {
+            echo "## terraform: configuration checked, state untouched"
+            echo ""
+            echo "Formatting and schema are valid. **No plan was run against the real"
+            echo "state**, on purpose: it would expose the production inventory to every"
+            echo "contributor and show an unreviewed author what a change would destroy."
+            echo ""
+            echo "To plan and apply, run this workflow manually from the Actions tab."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ------------------------------------------------------------------ bootstrap ----
+
+  # Creates the storage account that holds the Terraform state.
+  #
+  # This job exists because of a bootstrap paradox, and it is worth being explicit
+  # about why it is not written in Terraform. The backend configuration points at a
+  # storage account, so `terraform init` cannot run until that account exists. If the
+  # account were itself a Terraform resource, the Terraform that had to create it
+  # would need a backend that does not exist yet.
+  #
+  # So this one step uses the Azure CLI directly. It is idempotent: running it twice
+  # finds the account and leaves it alone. It touches only the state account and
+  # never the CRM resources, so it is safe to run on a schedule.
+  #
+  # Cost: a Standard_LRS account is a fraction of a cent per month.
+  bootstrap:
+    name: bootstrap the state storage
+    # Only ever on a manual run. Never on a pull request: a pull request must not be
+    # able to create cloud resources, whatever it contains.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.check.outputs.created }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}"}'
+
+      - name: Create the state storage account
+        id: check
+        env:
+          RG: ${{ env.STATE_RESOURCE_GROUP }}
+          ACCOUNT: ${{ env.STATE_STORAGE_ACCOUNT }}
+          CONTAINER: ${{ env.STATE_CONTAINER }}
+          LOCATION: westeurope
+        run: |
+          set -euo pipefail
+
+          if az storage account show --name "${ACCOUNT}" --resource-group "${RG}" >/dev/null 2>&1; then
+            echo "The state account ${ACCOUNT} already exists."
+            echo "created=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Creating the state resource group and account..."
+            az group create --name "${RG}" --location "${LOCATION}" --output none
+            az storage account create \
+              --name "${ACCOUNT}" \
+              --resource-group "${RG}" \
+              --location "${LOCATION}" \
+              --sku Standard_LRS \
+              --encryption-services blob \
+              --min-tls-version TLS1_2 \
+              --allow-blob-public-access false \
+              --output none
+            echo "created=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+          # The container is what the backend actually reads and writes. Creating it
+          # separately rather than relying on the backend to create it keeps the
+          # failure here, where the message names the container.
+          if az storage container show \
+               --name "${CONTAINER}" \
+               --account-name "${ACCOUNT}" >/dev/null 2>&1; then
+            echo "The container ${CONTAINER} already exists."
+          else
+            az storage container create \
+              --name "${CONTAINER}" \
+              --account-name "${ACCOUNT}" \
+              --auth-mode login \
+              --output none
+            echo "Created the container ${CONTAINER}."
+          fi
+
+          {
+            echo "## State storage"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| resource group | \`${RG}\` |"
+            echo "| storage account | \`${ACCOUNT}\` |"
+            echo "| container | \`${CONTAINER}\` |"
+            echo "| created now | ${ACCOUNT} |"
+            echo ""
+            echo "The Terraform state lives here from this run onwards. Public access is"
+            echo "off and TLS 1.2 is the floor."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ---------------------------------------------------------------------- plan ----
+
+  plan:
+    name: plan
+    needs: [check, bootstrap]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform-azure-vms-and-acr
+
+    outputs:
+      # Exposed so the apply step can distinguish "there are changes" from "the plan
+      # failed". Without this every step after it has to guess, and a step guarding
+      # against destroys ends up guarding nothing.
+      exit_code: ${{ steps.plan.outputs.exit_code }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}"}'
+
+      # A pull request must not be able to plan against the real state, so this whole
+      # job is manual-only. Stated at the job level as well as in the trigger, so that
+      # widening the trigger later does not silently open the state up.
+      - name: Refuse to plan with the throwaway SSH key
+        env:
+          # A repository variable, not a secret. A public key authorises nothing on
+          # its own, and being able to read it makes a wrong value obvious.
+          REAL_SSH_KEY: ${{ vars.TF_VAR_ssh_public_key }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REAL_SSH_KEY}" ]; then
+            echo "::error::vars.TF_VAR_ssh_public_key is not set."
+            echo ""
+            echo "The plan and apply use it, and the throwaway key in the pull request"
+            echo "path belongs to nothing. Applying with it would create a machine nobody"
+            echo "can log into."
+            echo ""
+            echo "To set it:"
+            echo "  gh variable set TF_VAR_ssh_public_key --body \"\$(cat ~/.ssh/id_ed25519.pub)\""
+            exit 1
+          fi
+          case "${REAL_SSH_KEY}" in
+            *plan-only-not-a-real-key*)
+              echo "::error::vars.TF_VAR_ssh_public_key is still the throwaway key."
+              echo "Applying that would create an unreachable machine."
+              exit 1
+              ;;
+          esac
+          echo "A real SSH key is configured."
+
+      - name: terraform init
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # The backend is passed entirely by flag. Nothing about the state location
+          # is in the repository, so a fork cannot point this at someone else's
+          # storage account.
+          terraform init \
+            -input=false -no-color \
+            -backend-config="resource_group=${STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${STATE_CONTAINER}" \
+            -backend-config="key=access_key" \
+            -backend-config="use_azuread_auth=true"
+
+      # The saved plan is what the apply job consumes, not a re-plan. This is the
+      # whole point of the gate: what is approved is what runs, byte for byte.
       - name: terraform plan
         id: plan
         env:
@@ -168,13 +332,39 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
           ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          TF_VAR_ssh_public_key: ${{ vars.TF_VAR_ssh_public_key }}
+          CONFIRM: ${{ inputs.confirm }}
+          DESTROY: ${{ inputs.destroy }}
         run: |
           set -uo pipefail
-          # -detailed-exitcode: 0 nothing to do, 2 there are changes, 1 an error.
-          # A plan with changes is not a failure, so 2 must not fail the step.
+
+          if [ "${CONFIRM}" != "APPLY" ]; then
+            echo "::error::inputs.confirm must be APPLY. Nothing was planned."
+            echo ""
+            echo "This is a typing gate, not an approval gate: the environment below"
+            echo "still asks a person to approve before anything is created."
+            exit 1
+          fi
+
+          if [ "${DESTROY}" = "true" ]; then
+            echo "### A destroy was requested"
+            echo ""
+            echo "- destroy=true plans the removal of everything, including the"
+            echo "  virtual machine that bills every minute it runs."
+            echo "- It was also requested with inputs.confirm, which stops it being"
+            echo "  typed by accident."
+            echo ""
+            target=("-destroy")
+            plan_args=("-destroy" "-out=tfplan")
+          else
+            plan_args=("-out=tfplan")
+          fi
+
           set +e
-          terraform plan -input=false -lock=false -no-color -out=tfplan \
-            -detailed-exitcode 2>&1 | tee /tmp/plan.txt
+          terraform plan \
+            -input=false -lock=true -no-color \
+            -detailed-exitcode \
+            "${plan_args[@]}" 2>&1 | tee /tmp/plan.txt
           code=${PIPESTATUS[0]}
           set -e
 
@@ -182,7 +372,7 @@ jobs:
             echo "## terraform plan"
             echo ""
             if [ "${code}" -eq 2 ]; then
-              echo "Changes would be applied. **This job does not apply.**"
+              echo "Changes would be applied. The apply is gated on an approval."
             elif [ "${code}" -eq 0 ]; then
               echo "Nothing to do: the state already matches the configuration."
             else
@@ -191,73 +381,118 @@ jobs:
               echo "the Contributor role on the subscription."
             fi
             echo ""
-            echo "ssh_public_key was satisfied by a throwaway key in this workflow, so"
-            echo "the plan's machine would not be reachable if this were ever applied."
-            echo "A real deployment needs your own key in terraform.tfvars."
-            echo ""
             echo '```'
             grep -E '^(Plan:|No changes|Error:|╷|│|╵)' /tmp/plan.txt || tail -20 /tmp/plan.txt
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          # Exposed so the next step can distinguish "there are changes" from "the plan
-          # failed". Without this, every step after it has to guess, and a step guarding
-          # against destroys ends up guarding nothing.
           echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
 
           # 0 and 2 are both successes. Only 1 is a failure.
           #
-          # The first version of this step ended with `exit "${code}"`, which turned
-          # every successful plan into a red check: -detailed-exitcode returns 2
-          # precisely when there are changes to make, and before this configuration has
-          # been applied there always are. The plan had succeeded and the workflow
-          # reported it as broken.
-          #
-          # Mapped here rather than with continue-on-error, because a step that swallows
-          # its own failure code cannot be reasoned about later: 2 means "changes", and
-          # anything else non-zero means the plan did not run.
+          # The first version of this ended with `exit "${code}"`, which turned every
+          # successful plan into a red check: -detailed-exitcode returns 2 precisely
+          # when there are changes to make, and before anything is applied there
+          # always are.
           if [ "${code}" -eq 1 ]; then
             exit 1
           fi
           exit 0
 
-      # Only when the plan succeeded and shows changes, and only when it shows a
-      # destroy. A destroy in a plan that has never been applied is the common case
-      # here, since there is no state yet, so this must not cry wolf about it.
-      - name: Warn when the plan would destroy something
-        if: steps.plan.outputs.exit_code == '2'
-        env:
-          EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
-        run: |
-          if grep -qE 'will be destroyed|must be replaced' /tmp/plan.txt; then
-            {
-              echo ""
-              echo "### The plan contains a destroy"
-              echo ""
-              echo "Read the plan before applying anything. A destroy on a resource that"
-              echo "was never created is harmless and is what the first plan looks like; a"
-              echo "destroy on an existing one is not."
-              echo ""
-              echo "This workflow does not apply. The apply is a deliberate act."
-            } >> "${GITHUB_STEP_SUMMARY}"
-          else
-            {
-              echo ""
-              echo "No destroy in this plan."
-              echo ""
-              echo "Two resources here cost real money: the virtual machine bills for"
-              echo "every minute it runs, and the registry bills for storage."
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
+      # The plan file contains the provider's partial state, which includes the
+      # credentials it was given, and it is the input to an apply that creates billable
+      # resources. Artifact retention is set to one day for that reason.
+      - name: Upload the plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/terraform-azure-vms-and-acr/tfplan
+          retention-days: 1
+          if-no-files-found: error
 
-      # terraform plan -out writes a file holding the provider's partial state, which
-      # includes the credentials it was given. It is a credential on disk, and this step
-      # runs even when the plan failed, which is when a partial file is most likely to
-      # be left behind.
-      #
-      # terraform.tfstate is removed for the same reason. Nothing applies, so it should
-      # be empty, but an init on a local backend writes the file and there is no reason
-      # to leave it lying about.
-      - name: Remove the plan file and any state
-        if: always()
-        run: rm -f tfplan terraform.tfstate terraform.tfstate.backup
+  # --------------------------------------------------------------------- apply ----
+
+  apply:
+    name: apply
+    needs: [plan]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # The gate. This is the GitHub equivalent of the hand-approval gate, except it
+    # happens inside the pipeline, so the plan it approves is the plan that runs and
+    # the whole thing is in the log.
+    #
+    # The environment is set up with prevent_self_review, so the person who started
+    # the run cannot be the person who approves it. Without that, the gate is a
+    # formality: one person types APPLY and clicks approve.
+    environment: production
+    defaults:
+      run:
+        working-directory: infra/terraform-azure-vms-and-acr
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}"}'
+
+      - name: Download the plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: infra/terraform-azure-vms-and-acr
+
+      - name: terraform init
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          terraform init \
+            -input=false -no-color \
+            -backend-config="resource_group=${STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${STATE_CONTAINER}" \
+            -backend-config="key=access_key" \
+            -backend-config="use_azuread_auth=true"
+
+      # `terraform apply tfplan`, not `terraform apply`. This is the difference between
+      # applying the plan that was approved and planning again at apply time, which
+      # would create whatever Azure looks like in between.
+      - name: terraform apply
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          [ -f tfplan ] || { echo "::error::No plan file. Nothing was applied."; exit 1; }
+          terraform apply -input=false -no-color -auto-approve tfplan
+
+      # After a destroy, or after replacing the resource group, the backend
+      # configuration itself may no longer be readable. A failure here is a real
+      # consequence of the apply, so it is reported rather than swallowed.
+      - name: Report what now exists
+        run: |
+          {
+            echo ""
+            echo "## Applied"
+            echo ""
+            echo "Outputs, so the next step does not need the console:"
+            echo '```'
+            terraform output -no-color 2>/dev/null || echo "(outputs unavailable: the backend may have been destroyed)"
+            echo '```'
+            echo ""
+            echo "The three Azure secrets are still unset, so the ACR mirror in"
+            echo "release.yml will keep announcing that it skips. See APPLY.md step 6."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          terraform output -no-color 2>/dev/null || true

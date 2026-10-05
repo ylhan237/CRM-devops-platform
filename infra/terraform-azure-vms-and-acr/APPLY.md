@@ -1,13 +1,16 @@
 # Appliquer l'infrastructure Azure
 
-Ce document explique comment passer du plan (qui a réussi et a produit 9 ressources)
-à la création réelle. **Rien n'a encore été créé sur Azure.** Aucune VM ne tourne,
-aucun registre ACR n'existe.
+**Rien n'a encore été créé sur Azure.** Aucune VM ne tourne, aucun registre ACR
+n'existe.
+
+L'infrastructure se déploie par **la pipeline**, déclenchée manuellement depuis
+l'onglet Actions. Ce document explique la marche à suivre.
 
 ## Ce que ça va créer, et ce que ça coûte
 
 | Ressource | Coût |
 |---|---|
+| compte de stockage de l'état | quelques centimes par mois |
 | `azurerm_resource_group.crm` | gratuit |
 | `azurerm_virtual_network`, `subnet`, `network_security_group` | gratuit |
 | `azurerm_public_ip` × 2 | gratuit tant qu'aucune VM n'y est attachée |
@@ -23,80 +26,85 @@ az vm stop -g crm-infra -n crm-infra-vm     # arrêter
 az vm start -g crm-infra -n crm-infra-vm    # redémarrer
 ```
 
-## Étape 1 — Générer la clé SSH
+## Préalable : la clé SSH
 
-La variable `ssh_public_key` n'a **aucun défaut**, volontairement : une machine
-avec une clé autorisée est une machine où quelqu'un peut se connecter.
+`ssh_public_key` n'a **aucun défaut**, volontairement : une machine avec une clé
+autorisée est une machine où quelqu'un peut se connecter.
 
 ```bash
 ssh-keygen -t ed25519 -C "crm-dev"
 ```
 
-La clé privée ne quitte jamais cette machine. Seul le contenu de `~/.ssh/id_ed25519.pub`
-sera collé à l'étape 2.
-
-Si tu n'as pas de clé, la machine est inaccessible après le premier démarrage.
-
-## Étape 2 — Remplir `terraform.tfvars`
+La clé privée ne quitte jamais ta machine. Seul le contenu de
+`~/.ssh/id_ed25519.pub` est mis dans la variable du dépôt :
 
 ```bash
-cd infra/terraform-azure-vms-and-acr
-cp terraform.tfvars.example terraform.tfvars
+gh variable set TF_VAR_ssh_public_key --body "$(cat ~/.ssh/id_ed25519.pub)"
 ```
 
-Puis colle le contenu de `~/.ssh/id_ed25519.pub` dans `ssh_public_key`.
+C'est une **variable**, pas un secret : une clé publique n'autorise rien seule, et
+le fait de pouvoir la lire rend une valeur erronée visible immédiatement.
 
-**Resserre SSH avant d'appliquer.** C'est le seul réglage qui vaille la peine de
-changer avant la première fois. Le défaut est `0.0.0.0/0`, c'est-à-dire accessible
-depuis tout l'Internet :
+La pipeline refuse de planifier si cette variable est absente, et refuse aussi si
+elle contient encore la clé jetable du chemin « pull request ». Sans cette
+protection, un `apply` créerait une machine où personne ne peut se connecter.
+
+## Préalable : la variable du dépôt
+
+Crée le fichier `.tfvars` localement pour les valeurs qui changent, ou passe-les
+par variables. Les deuxplus utiles :
 
 ```bash
+# TON adresse IP, pour restreindre SSH
 curl -s https://ifconfig.me
 ```
 
-Mets le résultat dans `allowed_ssh_source` sous la forme `X.X.X.X/32`.
+| Valeur | Où |
+|---|---|
+| `TF_VAR_ssh_public_key` | variable du dépôt, ci-dessus |
+| `allowed_ssh_source` | `terraform.tfvars` local, `X.X.X.X/32` |
 
-`terraform.tfvars` est gitignoré, donc rien ne part au dépôt.
+**C'est le seul réglage qui vaille la peine de changer avant la première fois.** Le
+défaut est `0.0.0.0/0`, c'est-à-dire accessible depuis tout l'Internet.
 
-## Étape 3 — Relire le plan
+## Le parcours
 
-```bash
-terraform init
-terraform plan
-```
+Depuis l'onglet **Actions**, lance **terraform** → *Run workflow*.
 
-Le plan a déjà été exécuté contre l'abonnement réel depuis la CI et a donné
-`9 to add, 0 to change, 0 to destroy`. Depuis ta machine il devrait être identique.
-**Lis-le quand même** : c'est la dernière occasion de voir ce qui va être créé.
+Trois entrées :
 
-Ce que tu dois vérifier :
+| Entrée | Valeur |
+|---|---|
+| `confirm` | `APPLY` — sinon le job `plan` s'arrête |
+| `destroy` | `false` — `true` planifie une destruction complète |
+
+Ce qui se passe ensuite :
+
+| Job | Rôle |
+|---|---|
+| `check` | `fmt` et `validate` avec les mêmes credentials que sur PR |
+| `bootstrap` | crée le compte de stockage qui portera l'état, s'il n'existe pas |
+| `plan` | planifie **contre l'état réel** et enregistre le plan |
+| `apply` | **attend une approbation**, puis applique le plan enregistré |
+
+Le job `apply` utilise `terraform apply tfplan`, pas `terraform apply`. C'est la
+différence entre appliquer le plan qui a été approuvé et replanifier au moment de
+l'application, ce qui créerait ce qu'Azure regarde entre les deux.
+
+Compte **5 à 10 minutes** pour l'application. La VM est lente à démarrer et le
+cloud-init installe Docker, Java 17, Node 20 et kubeadm.
+
+### Ce qu'il faut lire avant d'approuver
 
 - `9 to add`, et **`0 to destroy`** — une destruction n'est pas normale ici
-- le nom du groupe de ressources est bien `crm-infra`
-- `location = "westeurope"`
-- `size = "Standard_B2s"` — si tu as changé cette valeur entre-temps, le coût change
-- `ssh_public_key` contient **ta** clé, pas celle jetable du workflow
+- `size = "Standard_B2s"` — si tu as changé cette valeur, le coût change
+- `ssh_public_key` est bien **ta** clé
 - `allowed_ssh_source` est ton adresse, pas `0.0.0.0/0`
+- le nom du groupe de ressources est `crm-infra`
 
-## Étape 4 — Appliquer
+## Récupérer les sorties
 
-```bash
-terraform apply
-```
-
-Pas de `-auto-approve` la première fois. Terraform affiche le plan, tu confirmes,
-ça part.
-
-Compte **5 à 10 minutes**. La VM est lente à démarrer et le cloud-init installe
-Docker, Java 17, Node 20 et kubeadm.
-
-## Étape 5 — Récupérer les sorties
-
-```bash
-terraform output
-```
-
-Trois valeurs comptent :
+Le résumé du run `apply` affiche `terraform output`. Les trois valeurs utiles :
 
 | Sortie | Où la mettre |
 |---|---|
@@ -104,15 +112,14 @@ Trois valeurs comptent :
 | `vm_public_ip` | pour `ssh` |
 | `vm_ssh_command` | la commande de connexion, déjà formatée |
 
-## Étape 6 — Brancher le miroir ACR
+## Brancher le miroir ACR
 
 Dans cet ordre, parce que chaque étape dépend de la précédente.
 
 **a. Créer le principal de service avec le rôle `AcrPush`.**
 
 Le compte admin du registre est désactivé (`acr_admin_enabled = false`), parce
-qu'il donne le contrôle total et ne peut pas être restreint. Il faut donc un
-principal qui peut l'être.
+qu'il donne le contrôle total et ne peut pas être restreint.
 
 ```bash
 ACR_LOGIN=$(az acr show -n crmregistry -g crm-infra --query loginServer -o tsv)
@@ -126,10 +133,9 @@ az role assignment create \
   --scope "$(az acr show -n crmregistry --query id -o tsv)"
 ```
 
-`AcrPush` suffit : il permet de pousser, pas de lire la configuration ni de
-supprimer le registre.
+`AcrPush` suffit : pousser, sans lire la configuration ni supprimer le registre.
 
-**b. Poser les trois secrets GitHub.**
+**b. Poser les trois secrets.**
 
 ```bash
 echo "$ACR_LOGIN" | gh secret set AZURE_REGISTRY
@@ -137,30 +143,25 @@ echo "$APP_ID"    | gh secret set AZURE_REGISTRY_USERNAME
 echo "$PASS"      | gh secret set AZURE_REGISTRY_PASSWORD
 ```
 
-Le `USERNAME` est l'**app id du principal**, pas le nom de compte du registre, et
-pas l'admin.
+Le `USERNAME` est l'**app id du principal**, pas un nom de compte du registre.
 
-## Étape 7 — Vérifier le miroir
-
-Relance la Release :
+**c. Vérifier le miroir.**
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Cette fois le job `mirror to Azure Container Registry` doit montrer `Publish to ACR`
-**exécuté** et non `skipped`. La release précédente
-(`37261925170`) l'a sauté, parce que les trois secrets étaient absents.
+Le job `mirror to Azure Container Registry` doit montrer `Publish to ACR`
+**exécuté** et non `skipped`. La release `37261925170` l'a sauté, parce que les
+trois secrets étaient absents.
 
-Rien à reconfigurer : le miroir s'active de lui-même dès que les secrets existent.
-
-## Étape 8 — Le cluster
+## Le cluster
 
 Une fois la VM allumée et cloud-init terminé :
 
 ```bash
-ssh azureuser@$(terraform output -raw vm_public_ip)
+ssh azureuser@<vm_public_ip>
 
 export CRM_PUBLIC_IP=<ton IP publique>
 cd infra/kubernetes-kubeadm-cluster
@@ -171,37 +172,47 @@ sudo ./init-control-plane.sh
 l'API server. Sans elle, le kubeconfig recopié sur une autre machine échoue en
 `x509`, ce qui ressemble à un problème réseau.
 
+## En local, pour déboguer
+
+Le backend est `azurerm` avec des valeurs vides, fournies à l'init :
+
+```bash
+cd infra/terraform-azure-vms-and-acr
+terraform init \
+  -backend-config="resource_group=crm-state" \
+  -backend-config="storage_account_name=crmtfstate" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=access_key" \
+  -backend-config="use_azuread_auth=true"
+
+terraform plan
+terraform state list
+```
+
+`tfvars` reste utile en local pour itérer sans déclencher la pipeline.
+
 ## Si quelque chose se passe mal
 
 **Le plan échoue sur les credentials.** Un abonnement, un tenant ou un rôle
-Contributor manquant. Le message Azure nomme la cause ; le rôle manquant est le
-cas le plus fréquent.
+Contributor manquant. Le rôle manquant est le cas le plus fréquent.
 
-**La VM démarre mais SSH refuse la connexion.** Pres toujours `allowed_ssh_source`
-qui ne contient pas ton adresse actuelle, ton adresse a changé, ou la clé est
-mauvaise. Depuis le portail Azure, « Réinitialiser les identifiants » régénère la
-configuration sans toucher au disque.
+**La VM démarre mais SSH refuse la connexion.** Pres toujours
+`allowed_ssh_source` qui ne contient pas ton adresse actuelle, ton adresse a
+changé, ou la clé est mauvaise. Depuis le portail Azure, « Réinitialiser les
+identifiants » régénère la configuration sans toucher au disque.
 
-**`terraform apply` est interrompu.** L'état est conservé et un nouvel `apply`
-reprend où ça s'est arrêté. Un apply interrompu ne laisse pas les ressources à
-moitié créées : certaines le sont, d'autres non, et `plan` dira quoi reste.
+**L'application est interrompue.** L'état est distant et le verrou est libéré, donc
+relance le workflow : il repart où ça s'est arrêté.
 
-**Une ressource bloque un nouvel apply.**
+**Une ressource bloque.** En local :
 
 ```bash
-terraform state list
 terraform destroy -target=azurerm_linux_virtual_machine.vm
-terraform apply
 ```
 
 `-target` est à utiliser avec parcimonie : il produit un état qui ne correspond pas
 à la configuration, et le prochain plan en tient compte.
 
-**Tout effacer et repartir.**
-
-```bash
-terraform destroy
-```
-
+**Tout effacer.** Cocher `destroy: true` et `confirm: APPLY` dans le workflow.
 Comme `prevent_deletion_if_contains_resources` est actif, le groupe de ressources
-refuse d'être supprimé s'il reste quelque chose dedans. Vide-le d'abord.
+refuse d'être supprimé s'il reste quelque chose dedans.
