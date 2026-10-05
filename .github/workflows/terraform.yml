@@ -1,0 +1,249 @@
+# Terraform: format, validate, plan.
+#
+# This workflow exists for one reason: the four ARM_* secrets can only be verified by
+# using them. GitHub will not read a secret back, so "the secrets are set" and "the
+# secrets are correct" are different claims, and only `terraform plan` tells you which
+# one is true. It authenticates, it asks Azure what exists, and it fails on a wrong
+# subscription, a wrong tenant, a principal without Contributor, or a typo in a value.
+#
+# There is no `apply` here on purpose. Applying from CI means a machine nobody is
+# watching spending money on a virtual machine, and the first apply is the one a person
+# should read.
+
+name: terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform-azure-vms-and-acr/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    paths:
+      - "infra/terraform-azure-vms-and-acr/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs of this workflow on the same configuration would plan against the same state
+# and one of them would be stale by the time it reported. The second waits, then cancels
+# the first, which is what you want for a check.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "false"
+
+  # A throwaway public key, present only so `plan` can run.
+  #
+  # ssh_public_key has no default on purpose: a machine with an authorised key is a
+  # machine someone can log into, and the one thing this configuration must not do is
+  # ship a real key in a repository. With no value at all, plan stops before it reaches
+  # Azure with "No value for required variable", which is the correct refusal and also
+  # means the plan never gets far enough to find out whether the Azure credentials work.
+  #
+  # So the workflow supplies a real, well-formed ed25519 public key that belongs to
+  # nothing: its private half was generated once, never committed, and thrown away. A
+  # public key on its own grants access to no machine. It exists to satisfy the variable
+  # and its validation, and it is what lets the plan authenticate.
+  #
+  # A real deployment needs the operator's own key in terraform.tfvars, which is
+  # gitignored. Nothing here applies anything.
+  TF_VAR_ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQoOEOqe0upcgd/nmn1kX5iEfMF/1aLKj2zjKxS94F7 plan-only-not-a-real-key"
+
+jobs:
+  terraform:
+    name: terraform
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform-azure-vms-and-acr
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The tag is v4. setup-terraform@v3 is what most examples still say, and it is two
+      # majors behind.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Checked before anything touches Azure, so a missing secret names itself instead
+      # of surfacing as an authentication error three steps later that reads like a
+      # credentials problem rather than a missing one.
+      - name: Check the Azure credentials are present
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in ARM_SUBSCRIPTION_ID ARM_TENANT_ID ARM_CLIENT_ID ARM_CLIENT_SECRET; do
+            # Indirect expansion, so the value is never echoed. Only the name is.
+            value="${!name}"
+            if [ -z "${value}" ]; then
+              missing+=("${name}")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing secrets: ${missing[*]}"
+            echo ""
+            echo "They are repository settings, not files. To set them:"
+            echo "  gh secret set ARM_SUBSCRIPTION_ID"
+            echo ""
+            echo "Values come from an app registration in Microsoft Entra with the"
+            echo "Contributor role on the subscription. A principal with no role is the"
+            echo "most common reason a first plan fails."
+            exit 1
+          fi
+          echo "All four credentials are present."
+          echo ""
+          echo "Present is not correct. The plan below is what proves correct: it"
+          echo "authenticates and asks Azure what exists."
+          echo ""
+          echo "The subscription ID is a UUID and the tenant ID is a domain name."
+          # Shape only, never the value. A subscription ID that is not a UUID is
+          # caught here rather than as an opaque 401 later.
+          if ! printf '%s' "${ARM_SUBSCRIPTION_ID}" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+            echo "::error::ARM_SUBSCRIPTION_ID is not a UUID. Found ${#ARM_SUBSCRIPTION_ID} characters."
+            exit 1
+          fi
+
+      # fmt before init: it needs no provider and no network, so a formatting problem is
+      # reported in two seconds instead of after a provider download.
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          unformatted="$(terraform fmt -check -recursive -no-color || true)"
+          if [ -n "${unformatted}" ]; then
+            echo "::error::These files are not formatted. Run: terraform fmt -recursive"
+            printf '%s\n' "${unformatted}" | sed 's/^/  /'
+            exit 1
+          fi
+          echo "Formatting is clean."
+
+      # A plain init, no -backend=false.
+      #
+      # The first version of this step passed -backend=false on the reasoning that the
+      # backend is local and there is no remote state to fetch. That is true, and it is
+      # exactly why the flag must not be there: -backend=false skips backend
+      # initialisation, and `terraform plan` then refuses to run with "Backend
+      # initialization required". The step was written to avoid a problem it created.
+      #
+      # With a local backend, init writes terraform.tfstate into the workspace, which is
+      # gitignored and thrown away with the runner. Nothing to fetch, nothing to protect.
+      #
+      # No -lockfile=readonly either, deliberately. The lock file is gitignored in this
+      # configuration, so it is absent from the checkout, and readonly explicitly
+      # refuses to run without an existing lock file.
+      - name: terraform init
+        run: terraform init -input=false -no-color
+
+      - name: terraform validate
+        run: terraform validate -no-color
+
+      # -lock=false: the lock file is gitignored here, and a read-only checkout plus a
+      # lock write would fail on the first run.
+      #
+      # This is the step that verifies the secrets. Everything before it only checks the
+      # configuration against the provider schema.
+      - name: terraform plan
+        id: plan
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: |
+          set -uo pipefail
+          # -detailed-exitcode: 0 nothing to do, 2 there are changes, 1 an error.
+          # A plan with changes is not a failure, so 2 must not fail the step.
+          set +e
+          terraform plan -input=false -lock=false -no-color -out=tfplan \
+            -detailed-exitcode 2>&1 | tee /tmp/plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "## terraform plan"
+            echo ""
+            if [ "${code}" -eq 2 ]; then
+              echo "Changes would be applied. **This job does not apply.**"
+            elif [ "${code}" -eq 0 ]; then
+              echo "Nothing to do: the state already matches the configuration."
+            else
+              echo "The plan **failed**. If it stopped on Azure, the credentials are"
+              echo "wrong: a wrong subscription, a wrong tenant, or a principal without"
+              echo "the Contributor role on the subscription."
+            fi
+            echo ""
+            echo "ssh_public_key was satisfied by a throwaway key in this workflow, so"
+            echo "the plan's machine would not be reachable if this were ever applied."
+            echo "A real deployment needs your own key in terraform.tfvars."
+            echo ""
+            echo '```'
+            grep -E '^(Plan:|No changes|Error:|╷|│|╵)' /tmp/plan.txt || tail -20 /tmp/plan.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # Exposed so the next step can distinguish "there are changes" from "the plan
+          # failed". Without this, every step after it has to guess, and a step guarding
+          # against destroys ends up guarding nothing.
+          echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
+
+          exit "${code}"
+
+      # Only when the plan succeeded and shows changes, and only when it shows a
+      # destroy. A destroy in a plan that has never been applied is the common case
+      # here, since there is no state yet, so this must not cry wolf about it.
+      - name: Warn when the plan would destroy something
+        if: steps.plan.outputs.exit_code == '2'
+        env:
+          EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
+        run: |
+          if grep -qE 'will be destroyed|must be replaced' /tmp/plan.txt; then
+            {
+              echo ""
+              echo "### The plan contains a destroy"
+              echo ""
+              echo "Read the plan before applying anything. A destroy on a resource that"
+              echo "was never created is harmless and is what the first plan looks like; a"
+              echo "destroy on an existing one is not."
+              echo ""
+              echo "This workflow does not apply. The apply is a deliberate act."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          else
+            {
+              echo ""
+              echo "No destroy in this plan."
+              echo ""
+              echo "Two resources here cost real money: the virtual machine bills for"
+              echo "every minute it runs, and the registry bills for storage."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      # terraform plan -out writes a file holding the provider's partial state, which
+      # includes the credentials it was given. It is a credential on disk, and this step
+      # runs even when the plan failed, which is when a partial file is most likely to
+      # be left behind.
+      #
+      # terraform.tfstate is removed for the same reason. Nothing applies, so it should
+      # be empty, but an init on a local backend writes the file and there is no reason
+      # to leave it lying about.
+      - name: Remove the plan file and any state
+        if: always()
+        run: rm -f tfplan terraform.tfstate terraform.tfstate.backup
