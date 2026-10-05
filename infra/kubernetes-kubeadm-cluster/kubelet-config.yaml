@@ -1,0 +1,48 @@
+# The kubelet configuration, which reaches the node by a different path than
+# kubeadm-config.yaml.
+#
+#   kubectl -n kube-system patch configmap kubelet-config --type merge \
+#     -p "{\"data\":{\"kubelet\":$(cat kubelet-config.yaml)}}"
+#
+# init-control-plane.sh does this. kubeadm will not read this file, and putting it in
+# kubeadm-config.yaml looks correct and does nothing at all.
+
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+
+# systemd, and not a preference.
+#
+# The containerd package starts containerd with SystemdCgroup=true. A kubelet left on
+# cgroupfs then puts the node in a state that reports Ready while every pod fails with
+# "failed to create containerd task" or "OOMKilled", which is a genuinely misleading
+# message for a driver mismatch and costs hours if taken at face value.
+cgroupDriver: systemd
+
+# clusterDNS and clusterDomain are deliberately absent.
+#
+# kubeadm writes the correct values into the kubelet-config ConfigMap on its own, taken
+# from the serviceSubnet and dnsDomain in kubeadm-config.yaml. Setting them here by
+# hand means two places to keep in agreement, and pods that cannot resolve
+# kubernetes.default.svc is the symptom when they disagree.
+
+# Swap is a performance cliff and a correctness hazard: the kubelet refuses to start
+# with swap on, which is the intended behaviour rather than an obstacle to work around.
+failSwapOn: true
+
+serializeImagePulls: false
+
+# A Standard_B2s has 4 GiB. These thresholds mean a node under memory pressure evicts
+# before the machine is starved, which is the difference between a degraded service and
+# a control plane that has stopped responding.
+evictionHard:
+  imagefs.available: "15%"
+  memory.available: "300Mi"
+  nodefs.available: "10%"
+  nodefs.inodesFree: "5%"
+evictionSoft:
+  memory.available: "500Mi"
+
+# 75% is the kubelet default and it is fine. Stated so that its absence is a decision
+# rather than an oversight.
+imageGCHighThresholdPercent: 75
+imageGCLowThresholdPercent: 70
