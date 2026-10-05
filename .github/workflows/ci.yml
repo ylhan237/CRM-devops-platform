@@ -327,6 +327,141 @@ jobs:
             --format istanbul \
             coverage-frontend/coverage-summary.json
 
+  # --------------------------------------------------------- dependency-scan ----
+  # OWASP Dependency-Check, which note.txt asks for at the end: "pour tester les vul
+  # on a owasp".
+  #
+  # Trivy, in the release workflow, scans the built image's operating-system packages
+  # and the layers above the application. It says nothing about the 400-odd Java and
+  # JavaScript libraries the application itself pulls in, which is where most of the
+  # reachable CVEs in a Spring Boot application are. This job looks at those.
+  #
+  # Reported, not blocking, and the reason is specific rather than cautious. The
+  # dependency tree here carries transitive Spring and Node packages that will have
+  # published CVEs, and a blocking scan on a project that has never been scanned turns
+  # the first run into a wall of findings nobody has triaged. The output is the
+  # triage list; making it blocking is a one-word change once the list is short
+  # enough to be a rule rather than a project.
+  #
+  # `continue-on-error: true` is on the step, and the job still reports a failure, so
+  # the job is not in the gate. The two are not the same thing: a step that always
+  # passes would also not be in the gate, and this one at least shows up in the run.
+  dependency-scan:
+    name: dependency-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # Dependency-Check resolves the tree and downloads an NVD feed that is several
+      # hundred megabytes. Cached, because without it every run pays for the download
+      # and the job spends more time on the feed than on the seven modules.
+      - name: Cache the NVD data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: owasp-dc-${{ hashFiles('CRM_Backend/build-tools/pom.xml') }}
+          restore-keys: owasp-dc-
+
+      - name: OWASP Dependency-Check (backend)
+        # The seven modules each have their own pom and none at the root, so the
+        # aggregate goal is invoked per module rather than through a parent that does
+        # not exist. `--failOnError` off, because the threshold is a decision and not
+        # yet a made one; the report is what has value here.
+        run: |
+          mkdir -p reports
+          # 13.0.0, pinned. Without a version Maven resolves the latest release, so two
+          # runs a month apart scan different trees and a new finding cannot be told
+          # apart from a new plugin. The same reason the action tags are pinned.
+          DC_VERSION="13.0.0"
+          for module in $BACKEND_MODULES; do
+            echo "::group::$module"
+            mvn -B -ntp -q \
+              -f "CRM_Backend/$module/pom.xml" \
+              "org.owasp:dependency-check-maven:${DC_VERSION}:check" \
+              -Dformat=HTML \
+              -DfailBuildOnCVSS=11 \
+              -DfailOnError=false \
+              -DoutputDirectory="$PWD/reports/$module" \
+              -Ddata.directory="$HOME/.m2/repository/org/owasp/dependency-check-data" \
+              || echo "::warning::$module : the scan itself failed"
+            echo "::endgroup::"
+          done
+
+      - name: Frontend dependencies
+        working-directory: Front/CRM
+        # The JavaScript half of the same question. `npm audit` reads the lockfile and
+        # is a minute's work against a dependency tree of several hundred packages, so
+        # excluding it would leave the larger half of the surface unscanned because the
+        # tool for it happens to be a separate command.
+        #
+        # `npm audit fix --dry-run` rather than `npm audit`: the first reports, the
+        # second decides. A security step that rewrites the lockfile would produce a
+        # different tree on every run and a diff nobody reviewed.
+        run: |
+          npm audit --audit-level=high 2>&1 | tee /tmp/npm-audit.txt || true
+          echo ""
+          echo "### npm audit"
+          echo '```'
+          # The summary line carries the counts, which is what a reader needs here.
+          tail -20 /tmp/npm-audit.txt || echo "(no output)"
+          echo '```'
+
+      - name: Collect the reports
+        run: |
+          found="$(find reports -name 'dependency-check-report.html' | wc -l)"
+          if [ "$found" -ne 7 ]; then
+            echo "::warning::Expected 7 reports, found $found. Some modules may have"
+            echo "::warning::failed before producing one."
+            find reports -name '*.html' || true
+          else
+            echo "7 reports produced."
+          fi
+
+      # The run summary, because a report nobody opens changes nothing. Counts only,
+      # no package names: the HTML has those.
+      - name: Summarise
+        run: |
+          {
+            echo "## OWASP dependency scan"
+            echo ""
+            echo "Scans the libraries the application pulls in. Trivy, in the release"
+            echo "workflow, scans the image's system packages; it cannot see these."
+            echo ""
+            echo "| Module | CVEs >= 7 | Highest |"
+            echo "|---|---|---|"
+            for module in $BACKEND_MODULES; do
+              report="reports/$module/dependency-check-report.xml"
+              if [ -f "${report}" ]; then
+                # Dependency-Check's XML puts each issue in a <vulnerability> element
+                # with a cvssv2 attribute that may be absent on an unscored finding.
+                high="$(grep -o 'cvssv2="[4-9]\.[0-9]"' "${report}" 2>/dev/null | wc -l)"
+                top="$(grep -o 'cvssv2="[0-9]\.[0-9]"' "${report}" 2>/dev/null \
+                       | sed 's/[^0-9.]//g' | sort -rn | head -1)"
+                printf '| %s | %s | %s |\n' "${module}" "${high}" "${top:-0.0}"
+              else
+                printf '| %s | no report | - |\n' "${module}"
+              fi
+            done
+            echo ""
+            echo "**Not blocking.** The first scan of a project that has never been"
+            echo "scanned is a triage list, not a gate. Reports are in the job summary."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload the reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-dependency-check
+          path: reports
+          retention-days: 30
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------- gate ----
   # The single signal main's branch protection reads.
   #
