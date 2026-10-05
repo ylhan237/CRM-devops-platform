@@ -89,26 +89,35 @@ re-run after adding them: the next release picks them up.
 GitHub will not read a secret back, so "the secret is set" and "the secret is
 correct" are two different claims. What can be checked is which names exist:
 
-| Secret | Set? | Read by |
-|---|---|---|
-| `ARM_SUBSCRIPTION_ID` | yes | this configuration |
-| `ARM_TENANT_ID` | yes | this configuration |
-| `ARM_CLIENT_ID` | yes | this configuration |
-| `ARM_CLIENT_SECRET` | yes | this configuration |
-| `AZURE_REGISTRY` | **no** | the ACR mirror in `release.yml` |
-| `AZURE_REGISTRY_USERNAME` | **no** | the ACR mirror in `release.yml` |
-| `AZURE_REGISTRY_PASSWORD` | **no** | the ACR mirror in `release.yml` |
+| Secret | Set? | Verified? | Read by |
+|---|---|---|---|
+| `ARM_SUBSCRIPTION_ID` | yes | **yes** | this configuration |
+| `ARM_TENANT_ID` | yes | **yes** | this configuration |
+| `ARM_CLIENT_ID` | yes | **yes** | this configuration |
+| `ARM_CLIENT_SECRET` | yes | **yes** | this configuration |
+| `AZURE_REGISTRY` | **no** | — | the ACR mirror in `release.yml` |
+| `AZURE_REGISTRY_USERNAME` | **no** | — | the ACR mirror in `release.yml` |
+| `AZURE_REGISTRY_PASSWORD` | **no** | — | the ACR mirror in `release.yml` |
+
+The four `ARM_*` are not merely present, they are **verified**. `terraform plan`
+authenticated against the subscription with them and produced a complete plan, which
+only works with a correct subscription, a correct tenant and a principal holding
+**Contributor**. Run `37258457466`.
 
 The three Azure ones cannot be set yet, and that is not an oversight to fix: there
 is no ACR to authenticate against, because no `apply` has been run. The order is
-`apply` first, then a service principal with `AcrPush`, then the secrets.
+`apply` first, then a service principal with `AcrPush`, then the secrets. The
+procedure is in **`APPLY.md`** in this directory.
 
-The four `ARM_*` **names** are correct for this configuration. Whether their
-**values** are correct is only knowable by running a `plan`, which is what
-`.github/workflows/terraform.yml` exists for: it authenticates against Azure and
-asks what exists, and it fails on a wrong subscription, a wrong tenant, or a
-principal without the **Contributor** role on the subscription. Until that workflow
-has run green, these four secrets are present and unverified.
+## Applying it
+
+See **`APPLY.md`** for the whole sequence: generating the SSH key, narrowing
+`allowed_ssh_source`, reading the plan, applying, creating the service principal,
+wiring the three secrets, and bringing up the cluster.
+
+The one thing to do before the first apply: **narrow SSH**. `allowed_ssh_source`
+defaults to `0.0.0.0/0`, which means the machine is reachable from the whole
+internet, and the machine bills money for every minute it runs.
 
 ## What was verified, and what was not
 
