@@ -18,6 +18,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
+
 @ExtendWith(MockitoExtension.class)
 class EventServiceImplTest {
 
@@ -40,7 +42,10 @@ class EventServiceImplTest {
         details.setStart_time(LocalTime.of(9, 0));
         details.setEnd_time(LocalTime.of(12, 0));
         details.setExpected_person(120);
-        details.setBudget(4500f);
+        // BigDecimal, like the entity. The string form is used rather than
+        // new BigDecimal(4500.00) because a double literal reintroduces exactly the
+        // binary rounding this type exists to avoid, one indirection away.
+        details.setBudget(new BigDecimal("4500.00"));
         details.setDescription("Updated event");
         details.setTypeId(2L);
         details.setVenue("Main Hall");

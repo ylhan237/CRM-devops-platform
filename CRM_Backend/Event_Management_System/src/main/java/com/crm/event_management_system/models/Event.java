@@ -8,6 +8,7 @@ import lombok.Setter;
 import lombok.experimental.SuperBuilder;
 import org.springframework.format.annotation.DateTimeFormat;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Set;
@@ -46,8 +47,21 @@ public class Event {
     @Column(name="expected_person", nullable=false)
     private int expected_person;
 
-    @Column(name="budget", nullable=false)
-    private float budget;
+    // BigDecimal, and not float or double.
+    //
+    // A float carries 24 bits of mantissa, which is about 7 significant decimal
+    // digits. A budget of 1 000 000.10 stored in one comes back as 1000000.125. That
+    // is not rounding, it is the wrong number, and for a monetary amount it is the
+    // kind of wrong that ends up in a reconciliation.
+    //
+    // BigDecimal maps to DECIMAL, which is what the column should have been from the
+    // start. ddl-auto is update, so Hibernate widens the column on the next start;
+    // existing rows are converted by the database.
+    //
+    // Jackson serialises BigDecimal as a plain JSON number, exactly as it did float,
+    // so nothing on the Angular side changes.
+    @Column(name="budget", nullable=false, precision = 19, scale = 2)
+    private BigDecimal budget;
 
     @Column(name="description", nullable=false)
     private String description;
