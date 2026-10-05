@@ -342,18 +342,90 @@ les vagues 0, 1 et 3 sont terminées. Ce qui reste réellement est ci-dessous.
 | 2 — tests | `test/add-unit-tests` | ❌ **non commencée**, §5.5 |
 | 2 — tests | `test/add-contract-and-schema-tests` | ❌ non commencée |
 | 3 — CI/CD | 4 branches | ✅ mergées (PR #12, #14, #15) |
-| 4 — infra | 4 branches | 🟡 écrites et vérifiées, **PR #17 à #20 ouvertes** |
+| 4 — infra | 4 branches | ✅ mergées (PR #17 à #20) |
+
+### Audit de l'énoncé, point par point
+
+`note.txt` ne demande pas « des tests » ou « de l'infrastructure » : il demande des
+choses précises. Voici chaque exigence et son état réel, vérifié contre le dépôt.
+
+| `note.txt` | Exigence | État |
+|---|---|---|
+| 1 | build multi-étage, BDD externe lancée avant le build | ✅ Testcontainers |
+| 1 | health check pour le frontend | ✅ `HEALTHCHECK` + sondes |
+| 2 | linters, code coverage, tests unitaires / intégration / non-régression | ✅ 5 jobs |
+| 3 | BDD dans la CI, connexion vérifiée, opérations testées | ✅ Testcontainers + WireMock |
+| 4 | release par tag, publication dans un registre | ✅ 26/26, 8 images publiées |
+| 5 | déploiement Heroku | ⛔ **abandonné**, décision de périmètre |
+| 6 | provisionner les VM avec Terraform, installer les paquets | ✅ plan réel à 9 ressources |
+| 7 | cluster Kubernetes avec kubeadm, déployer la stack | ✅ scripts écrits, cluster non créé |
+| 8 | limites CPU/RAM, **réservation** | ✅ `requests` + `limits` sur les 9 |
+| 8 | **liveness, readiness, startup probes** | ✅ PR #31, ajoutées sur les 9 |
+| 8 | frontend en Deployment, BDD en StatefulSet | ✅ |
+| 8 | certificat TLS | ✅ auto-signé, et dit comme tel |
+| 8 | service LoadBalancer | 🔄 **Ingress ClusterIP + TLS**, §5.7 |
+| 9 | chart Helm | ✅ |
+| 9 | **release et publication du chart** | ✅ PR #33 |
+| 30 | **3 pipelines** | ✅ images / infrastructure / Kubernetes |
+| 32 | scan Trivy | ✅ dans la release |
+| 32 | **scan OWASP des vulnérabilités** | ✅ PR #32, hors porte au premier run |
+
+Les trois lignes en gras étaient des manques réels, trouvés en relisant l'énoncé
+contre le dépôt plutôt que contre `note.md`.
+
+### §5.7 — LoadBalancer ou Ingress, et pourquoi
+
+`note.txt` dit « le service potentiellement de type load balancer qui sera cree pour
+exposer l'application », et le mot « potentiellement » est important.
+
+Ce projet expose par **Ingress ClusterIP avec TLS**, pas par un Service
+`LoadBalancer`. Les raisons :
+
+- un `LoadBalancer` Azure provisionne une **IP publique par service**, facturée, et
+  l'Ingress en provisionne une seule pour toute l'application ;
+- le TLS se termine sur l'Ingress dans les deux cas, mais il n'y a qu'un certificat
+  à gérer ;
+- les trois services applicatifs restent inaccessibles depuis l'extérieur, ce qu'un
+  Service `LoadBalancer` sur chacun rendrait possible par simple distraction.
+
+Si l'énoncé est lu comme une exigence de `LoadBalancer` plutôt que comme une
+suggestion, le chart porte déjà le point de bascule : il suffit de passer
+`ingress.enabled: false` et d'ajouter un Service `LoadBalancer` sur le frontend. Ce
+n'est pas fait parce que ce serait pire, et le dire vaut mieux que de le faire en
+silence.
 
 ### Ce qui reste réellement
 
 | Priorité | Travail | Pourquoi |
 |---|---|---|
-| 1 | Merger les 5 PR ouvertes (#16 → #20) | tout est écrit et vérifié, rien n'est mergé |
-| 2 | **11 défauts S2** | non commencés |
+| 1 | Merger les PR #30 → #33 | le correctif du RG, les startup probes, OWASP, la publication du chart |
+| 2 | **11 défauts S2** | **le travail existe** dans le commit `4685471`, jamais mergé — §5.8 |
 | 3 | **11 défauts S3** | non commencés |
 | 4 | `test/add-unit-tests` | le backend est à 20,40 %, la crémaillère vise 0,25 puis 0,30 |
 | 5 | 2 branches amont de sécurité pour Frederic | travail fait et testé, il manque le conditionnement sur sa base |
-| 6 | `terraform apply` | la seule chose qui reste pour que l'infra existe |
+| 6 | `terraform apply` | la seule chose qui reste pour que l'infra existe, et la seule qui coûte de l'argent |
+
+### §5.8 — Les S2 ne sont pas à faire, ils sont à merger
+
+C'est la ligne la plus utile de cette section. Les 11 défauts S2 ont été corrigés,
+testés, et commits — mais **jamais mergés**, parce qu'ils vivaient dans le working
+tree de quelqu'un d'autre.
+
+| Où | Contenu |
+|---|---|
+| `4685471` sur `infra/terraform-azure-vms-and-acr` | **le plus propre** : 35 fichiers applicatifs, sans l'infra mélangée |
+| `wip/recovered-agent-session-2026-10-04` | les mêmes S2, plus l'infra Terraform |
+| `wip/recovered-baseline-2026-10-04` | l'état complet du dépôt ce jour-là |
+
+Les deux branches `wip/` étaient sur **aucune branche** avant d'être poussées, donc un
+`git gc` les aurait supprimées. Elles ont été créées pour cela et **ne doivent pas être
+mergées** : ce sont des points de récupération, pas des livraisons.
+
+Ce qui manque est donc une PR depuis `4685471`, pas du travail. Je ne l'ouvre pas
+seul : c'est du code applicatif écrit dans une session automatisée, et je ne sais pas
+ce que chaque changement est censé corriger. Un diff de 35 fichiers sans intention
+lisible n'est pas reviewable, et c'est la définition d'une revue qui ne peut pas
+avoir lieu.
 
 ### Pourquoi les tests passent à 30 % par paliers
 
