@@ -45,16 +45,38 @@ spec:
               value: prod
             - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
               value: http://service-discovery:8761/eureka/
+          # Three probes, because they answer three different questions.
+          #
+          # The startup probe exists so that the liveness probe can be aggressive
+          # without becoming a way to kill a service that is still booting. Without
+          # it, liveness has to be given an initialDelay long enough for the slowest
+          # start, which is either wasteful when the service is healthy in 20 seconds
+          # or fatal when it is not. A Spring Boot service on a 4 GiB VM with a cold
+          # JIT and a MySQL it has to wait for is not a fixed quantity.
+          #
+          # While the startup probe is failing, the liveness and readiness probes are
+          # not run at all. So: up to 5 x 12 = 60 seconds to open the port, and only
+          # then does liveness start checking every 20 seconds.
+          startupProbe:
+            tcpSocket:
+              port: 8060
+            # 5 attempts every 12 seconds, so 60 seconds of grace, and a failure kills
+            # rather than retries forever.
+            failureThreshold: 5
+            periodSeconds: 12
           readinessProbe:
             tcpSocket:
               port: 8060
-            initialDelaySeconds: 40
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 8060
-            initialDelaySeconds: 90
+            # No initialDelaySeconds on purpose: the startup probe is what holds the
+            # liveness probe off, so the delay would only be subtracted twice.
             periodSeconds: 20
+            # 3 failures at 20 seconds is a minute of an established service not
+            # accepting connections before it is restarted.
+            failureThreshold: 3
           resources:
             requests:
               cpu: 200m

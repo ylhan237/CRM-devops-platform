@@ -69,7 +69,7 @@ spec:
             {{- end }}
             - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
               value: "http://{{ .Values.serviceDiscovery.name }}:{{ .Values.serviceDiscovery.port }}/eureka/"
-          {{- include "crm.backendProbes" (dict "port" "http" "readiness" (dict "initialDelaySeconds" 40 "periodSeconds" 10) "liveness" (dict "initialDelaySeconds" 90 "periodSeconds" 20)) | nindent 10 }}
+          {{- include "crm.backendProbes" (dict "port" "http" "readiness" (dict "periodSeconds" 10) "liveness" (dict "periodSeconds" 20 "failureThreshold" 3) "startup" (dict "failureThreshold" 5 "periodSeconds" 12)) | nindent 10 }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
       {{- include "crm.scheduling" . | nindent 6 }}

@@ -147,16 +147,50 @@ carries the actuator starter, so /actuator/health answers there and nowhere
 else. An HTTP probe on the other six would fail for a reason that has nothing to
 do with whether they are healthy. A socket probe proves the port is being
 accepted, which is weaker and is said out loud in the README.
+
+The startup probe is the one that makes the other two safe to tune: while it is
+failing, Kubernetes does not run the liveness or readiness probes at all. So liveness
+can then be aggressive without becoming a way to kill a container that is still
+booting. Without it, liveness has to carry an initialDelaySeconds long enough for the
+slowest boot, which is wrong in both directions: far too long for every restart after
+the first, and not long enough on a cold VM waiting for a MySQL. Every service in
+this chart had initialDelaySeconds: 90 on liveness, which was the delay standing in
+for the probe that was missing.
+
+`probeStyle` is "/" for nginx, which answers on / without an application behind it.
+Everywhere else the port is only proven to be open.
 */}}
 {{- define "crm.backendProbes" -}}
-readinessProbe:
+startupProbe:
+  {{- if .probeStyle }}
+  httpGet:
+    path: {{ .probeStyle }}
+    port: {{ .port }}
+  {{- else }}
   tcpSocket:
     port: {{ .port }}
-  initialDelaySeconds: {{ .readiness.initialDelaySeconds | default 40 }}
+  {{- end }}
+  failureThreshold: {{ .startup.failureThreshold | default 5 }}
+  periodSeconds: {{ .startup.periodSeconds | default 12 }}
+readinessProbe:
+  {{- if .probeStyle }}
+  httpGet:
+    path: {{ .probeStyle }}
+    port: {{ .port }}
+  {{- else }}
+  tcpSocket:
+    port: {{ .port }}
+  {{- end }}
   periodSeconds: {{ .readiness.periodSeconds | default 10 }}
 livenessProbe:
+  {{- if .probeStyle }}
+  httpGet:
+    path: {{ .probeStyle }}
+    port: {{ .port }}
+  {{- else }}
   tcpSocket:
     port: {{ .port }}
-  initialDelaySeconds: {{ .liveness.initialDelaySeconds | default 90 }}
+  {{- end }}
   periodSeconds: {{ .liveness.periodSeconds | default 20 }}
+  failureThreshold: {{ .liveness.failureThreshold | default 3 }}
 {{- end -}}

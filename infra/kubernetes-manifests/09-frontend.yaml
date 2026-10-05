@@ -48,18 +48,29 @@ spec:
             - containerPort: 80
           # The only container here with an HTTP probe worth having: nginx answers
           # on / without any application behind it.
+          # Same three probes as the backend, on HTTP rather than a socket, because
+          # nginx answers on / without an application behind it. Everywhere else the
+          # port is only proven to be open.
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            # 5 x 12 = 60 seconds of grace. nginx answers in milliseconds once it is
+            # up, so this only covers the wait for the gateway the initContainer does.
+            failureThreshold: 5
+            periodSeconds: 12
           readinessProbe:
             httpGet:
               path: /
-              port: 80
-            initialDelaySeconds: 5
+              port: http
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /
-              port: 80
-            initialDelaySeconds: 15
+              port: http
+            # No initialDelaySeconds: the startup probe is what holds this off.
             periodSeconds: 20
+            failureThreshold: 3
           resources:
             requests:
               cpu: 50m

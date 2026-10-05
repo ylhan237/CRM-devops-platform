@@ -154,10 +154,22 @@ the cluster side.
 `helm lint` passes. `helm template` renders 21 documents by default and 22 with
 `secrets.create: true`, and a structural check of every rendered document found
 no problems: each Deployment's selector matches its pod labels and carries a
-readiness probe, a liveness probe, resources and an image; the StatefulSet's
-`volumeClaimTemplates` sits at the StatefulSet spec level rather than the pod
-level, and declares a claim named `data` that the pod does not shadow; every
+startup probe, a readiness probe, a liveness probe, resources and an image; the
+StatefulSet's `volumeClaimTemplates` sits at the StatefulSet spec level rather than
+the pod level, and declares a claim named `data` that the pod does not shadow; every
 Service has a selector; the retention policy is present whenever persistence is.
+
+**Three probes, not two.** `note.md` asks for startup, readiness and liveness. The
+startup probe is the one that makes the other two safe to tune: while it fails,
+Kubernetes runs neither of the others, so liveness does not need an
+`initialDelaySeconds` long enough to cover the slowest boot. This chart carried
+`initialDelaySeconds: 90` on every service, which was the delay substituting for the
+probe that was missing — wrong in both directions, far too long after the first start
+and not long enough on a cold VM waiting for MySQL.
+
+Tolerances, identical to the plain manifests: 5 × 12 s for the services and the
+frontend, 10 × 10 s for `service-discovery` because every service registers against
+it, and 30 × 10 s for MySQL because a first start initialises the data directory.
 
 The override semantics were tested by rendering with a sixth service added, and
 both persistence paths were rendered and compared. Three failures were caught by
