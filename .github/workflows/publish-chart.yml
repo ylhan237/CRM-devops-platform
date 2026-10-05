@@ -1,0 +1,180 @@
+# Publish the Helm chart
+#
+# note.txt 9: "lorsque c'est fait on peut en faire un repo dedie et on fait une release
+# et on publie. les chart peuvent etre publiee parce que github integre desormais un
+# chart repository".
+#
+# So: package the chart, attach it to a GitHub release, and point Helm at the
+# releases URL. What that gives is `helm install crm ylhan237/crm --version 0.1.0`
+# from anywhere, with no clone and no repository configuration.
+#
+# Not a dedicated repository. The brief says one is an option, and a separate repo
+# would mean publishing the chart twice from two places. The chart lives in this
+# repository, which is where the image versions it refers to also live, and the
+# releases URL already serves it. Splitting it is a change to make when two charts
+# need independent versioning, not before.
+
+name: publish-chart
+
+on:
+  push:
+    tags:
+      # The chart's own version, which is distinct from the application version:
+      # Chart.yaml has version 0.1.0 and appVersion 0.1.0, and they answer different
+      # questions. Bumping only the appVersion releases a new set of images without a
+      # new chart, which needs no chart release.
+      - 'chart-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Package and check, publish nothing.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: publish the chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Helm
+        # v5, checked against the registry. v4 is what most examples still say and it
+        # is a major behind.
+        uses: azure/setup-helm@v5
+        with:
+          # The same 3.16.3 used to lint and render this chart locally, so a
+          # difference in behaviour is not something the version explains away.
+          version: v3.16.3
+
+      - name: Read the chart version
+        id: chart
+        run: |
+          set -euo pipefail
+          version="$(helm show chart infra/helm-chart | awk '/^version:/ {print $2}')"
+          app="$(helm show chart infra/helm-chart | awk '/^appVersion:/ {print $2}')"
+          if [ -z "${version}" ]; then
+            echo "::error::Could not read the version from Chart.yaml."
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "appVersion=${app}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Chart $${version} (app $${app})"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "chart version : ${version}"
+          echo "app version   : ${app}"
+
+      # Lint before packaging, not after. A packaged chart that fails lint has already
+      # been uploaded to a registry, and un-publishing is a separate operation from
+      # publishing.
+      - name: Lint
+        run: helm lint infra/helm-chart --strict
+
+      - name: Render and confirm the application is still complete
+        run: |
+          set -euo pipefail
+          # The packaged chart has to render to the same nine workloads. `helm package`
+          # does not check this, and a chart that packages successfully while rendering
+          # four of its nine Deployments is a release nobody would notice until it was
+          # installed.
+          expected=9
+          rendered="$(helm template crm infra/helm-chart --namespace crm \
+            | grep -c '^kind: \(Deployment\|StatefulSet\)$')"
+          echo "workloads rendered : ${rendered}"
+          if [ "${rendered}" -ne "${expected}" ]; then
+            echo "::error::Expected ${expected} workloads, rendered ${rendered}."
+            exit 1
+          fi
+
+      # The version in Chart.yaml and the tag have to agree, or `helm install
+      # --version 0.1.0` resolves to something nobody published.
+      - name: Check the tag matches the chart version
+        if: startsWith(github.ref, 'refs/tags/chart-v')
+        run: |
+          set -euo pipefail
+          tagged="${GITHUB_REF_NAME#chart-v}"
+          if [ "${tagged}" != "${{ steps.chart.outputs.version }}" ]; then
+            echo "::error::Tag is chart-v${tagged} but Chart.yaml says ${{ steps.chart.outputs.version }}."
+            echo ""
+            echo "A consumer installing --version ${{ steps.chart.outputs.version }}"
+            echo "would get nothing, because the release published under a different name."
+            exit 1
+          fi
+          echo "Tag and Chart.yaml agree: ${tagged}"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm package infra/helm-chart --destination dist
+          ls -la dist/
+
+      - name: Inspect the package
+        run: |
+          set -euo pipefail
+          # The archive is the artefact, so its contents are checked rather than the
+          # directory's. A .helmignore that stops matching silently ships a chart with
+          # a credential in it or without its templates, and neither shows up until an
+          # install fails.
+          tar -tzf dist/crm-*.tgz | sort | sed 's/^/  /'
+
+          if tar -tzf dist/crm-*.tgz | grep -qE '(tls\.key|tls\.crt|\.env$|terraform\.tfvars)'; then
+            echo "::error::The package contains a credential. .helmignore is not covering it."
+            exit 1
+          fi
+          echo ""
+          echo "No credential in the package."
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # helm/gh release create rather than helm push: gh release create also makes
+          # the asset downloadable from the releases URL, which is what
+          # `helm install oci://` or a plain https repository both read. helm push
+          # alone would need an OCI registry configured.
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/crm-*.tgz \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "crm chart ${{ steps.chart.outputs.version }}" \
+            --generate-notes \
+            --notes "Application version ${{ steps.chart.outputs.appVersion }}.
+
+            \`\`\`bash
+            helm repo add crm https://ylhan237.github.io/CRM-devops-platform
+            helm repo update
+            helm install crm crm/crm --version ${{ steps.chart.outputs.version }}
+            \`\`\`
+
+            Or without a repository entry:
+
+            \`\`\`bash
+            helm install crm oci://ghcr.io/ylhan237/charts/crm \\
+              --version ${{ steps.chart.outputs.version }}
+            \`\`\`"
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "## Where it is"
+            echo ""
+            echo "A chart release is a GitHub release carrying the \`.tgz\`. Helm reads"
+            echo "them straight from the releases URL, so installing needs no clone:"
+            echo ""
+            echo '```bash'
+            echo "helm repo add crm https://ylhan237.github.io/CRM-devops-platform"
+            echo "helm repo update"
+            echo "helm install crm crm/crm --version ${{ steps.chart.outputs.version }}"
+            echo '```'
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo ""
+              echo "Dry run: nothing was published."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
