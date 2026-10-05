@@ -279,26 +279,44 @@ jobs:
       # widening the trigger later does not silently open the state up.
       - name: Refuse to plan with the throwaway SSH key
         env:
+          # UPPERCASE name, because that is what GitHub stores.
+          #
+          # `gh variable set TF_VAR_ssh_public_key` creates the variable as
+          # TF_VAR_SSH_PUBLIC_KEY: the CLI normalises repository variable names to
+          # upper case, and `vars.X` in an expression does not. Referencing it in
+          # lower case resolves to an empty string, the guard below then refuses to
+          # plan, and the message blames a missing key that is plainly visible in the
+          # repository settings.
+          #
           # A repository variable, not a secret. A public key authorises nothing on
           # its own, and being able to read it makes a wrong value obvious.
-          REAL_SSH_KEY: ${{ vars.TF_VAR_ssh_public_key }}
+          REAL_SSH_KEY: ${{ vars.TF_VAR_SSH_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${REAL_SSH_KEY}" ]; then
-            echo "::error::vars.TF_VAR_ssh_public_key is not set."
+            echo "::error::The repository variable TF_VAR_SSH_PUBLIC_KEY is not set."
             echo ""
             echo "The plan and apply use it, and the throwaway key in the pull request"
             echo "path belongs to nothing. Applying with it would create a machine nobody"
             echo "can log into."
             echo ""
-            echo "To set it:"
+            echo "To set it. Note the CLI upper-cases the name:"
             echo "  gh variable set TF_VAR_ssh_public_key --body \"\$(cat ~/.ssh/id_ed25519.pub)\""
             exit 1
           fi
           case "${REAL_SSH_KEY}" in
             *plan-only-not-a-real-key*)
-              echo "::error::vars.TF_VAR_ssh_public_key is still the throwaway key."
+              echo "::error::TF_VAR_SSH_PUBLIC_KEY still holds the throwaway key."
               echo "Applying that would create an unreachable machine."
+              exit 1
+              ;;
+          esac
+          case "${REAL_SSH_KEY}" in
+            ssh-*|ecdsa-*) : ;;
+            *)
+              echo "::error::TF_VAR_SSH_PUBLIC_KEY does not look like a public key."
+              echo "First characters: ${REAL_SSH_KEY:0:20}"
+              echo "Expected something starting with ssh- or ecdsa-."
               exit 1
               ;;
           esac
@@ -332,7 +350,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
           ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-          TF_VAR_ssh_public_key: ${{ vars.TF_VAR_ssh_public_key }}
+          TF_VAR_ssh_public_key: ${{ vars.TF_VAR_SSH_PUBLIC_KEY }}
           CONFIRM: ${{ inputs.confirm }}
           DESTROY: ${{ inputs.destroy }}
         run: |
