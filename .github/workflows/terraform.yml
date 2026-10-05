@@ -205,7 +205,21 @@ jobs:
           # against destroys ends up guarding nothing.
           echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
 
-          exit "${code}"
+          # 0 and 2 are both successes. Only 1 is a failure.
+          #
+          # The first version of this step ended with `exit "${code}"`, which turned
+          # every successful plan into a red check: -detailed-exitcode returns 2
+          # precisely when there are changes to make, and before this configuration has
+          # been applied there always are. The plan had succeeded and the workflow
+          # reported it as broken.
+          #
+          # Mapped here rather than with continue-on-error, because a step that swallows
+          # its own failure code cannot be reasoned about later: 2 means "changes", and
+          # anything else non-zero means the plan did not run.
+          if [ "${code}" -eq 1 ]; then
+            exit 1
+          fi
+          exit 0
 
       # Only when the plan succeeded and shows changes, and only when it shows a
       # destroy. A destroy in a plan that has never been applied is the common case
