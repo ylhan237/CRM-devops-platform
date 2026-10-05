@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: crm
+  labels:
+    app: auth-service
+spec:
+  type: ClusterIP
+  selector:
+    app: auth-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: crm
+  labels:
+    app: auth-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: ghcr.io/ylhan237/auth-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql:3306/authdb?createDatabaseIfNotExist=true
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: db-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: db-password
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: http://service-discovery:8761/eureka/
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: jwt-secret-key
+            - name: ACTIVATION_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: crm-config
+                  key: activation-url
+            - name: RESET_PASSWORD_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: crm-config
+                  key: reset-password-url
+            - name: FILE_UPLOAD_DIR
+              value: /var/lib/crm/uploads
+            - name: MAIL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: crm-config
+                  key: mail-host
+            - name: MAIL_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: crm-config
+                  key: mail-port
+            - name: MAIL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mail-username
+            - name: MAIL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mail-password
+          # tcpSocket, not httpGet on /actuator/health: only service-discovery
+          # carries the actuator starter, so an HTTP probe would fail here for a
+          # reason that has nothing to do with whether the service is healthy. A
+          # socket probe proves the port is being accepted. Adding the actuator to
+          # every service would give a real health endpoint, and is the change to
+          # make if these probes ever need to be more than liveness.
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /var/lib/crm/uploads
+      volumes:
+        # emptyDir rather than a claim: uploaded photos belong to a pod, and two
+        # replicas of auth-service cannot share a ReadWriteOnce volume. A single
+        # replica plus a claim is the alternative, and is a change to make when
+        # the photos matter more than the availability.
+        - name: uploads
+          emptyDir: {}

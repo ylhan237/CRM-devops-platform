@@ -1,0 +1,47 @@
+# One address for the whole application.
+#
+# Everything under /api goes to the gateway, which is the only backend entry
+# point, and everything else goes to the frontend. The order matters: the /api
+# rule is first because the ingress controller prefers the longest matching path,
+# but writing it second would make the intent depend on that rule rather than
+# read as it is meant.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crm
+  namespace: crm
+  annotations:
+    # Lets a backend of this size serve the 8 MiP candidate documents without the
+    # default 1 MiB refusing them. A real deployment would set this to a limit
+    # chosen from the application's actual needs rather than removed.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - crm.local
+      # A self-signed certificate, because there is no domain name here. Browsers
+      # will refuse it, which is honest: it proves TLS terminates, it does not
+      # prove identity. Replace with cert-manager and a real name to get a
+      # certificate anyone accepts.
+      secretName: crm-tls
+  rules:
+    - host: crm.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8060
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

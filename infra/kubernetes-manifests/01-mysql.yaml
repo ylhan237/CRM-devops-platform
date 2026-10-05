@@ -1,0 +1,116 @@
+# MySQL as a StatefulSet rather than a Deployment.
+#
+# A Deployment may replace the pod at any moment and come back with an empty
+# volume, because the volume would follow the pod name and a new pod means a new
+# name. A StatefulSet gives the pod a stable identity, a stable DNS name, and a
+# volume that is claimed rather than recreated.
+#
+# This is what note.md 4.3 asks for, and it is the right shape for a database
+# even in a lab.
+#
+# The storage class is whatever the cluster provides. On a kubeadm cluster built
+# by 4.2 there is usually no default StorageClass, in which case the claim stays
+# Pending until one is created. That is stated in the README rather than worked
+# around here, because a local-path provisioner has to be installed deliberately.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: crm
+  labels:
+    app: mysql
+spec:
+  clusterIP: None
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: crm
+  labels:
+    app: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mysql-database
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crm-secrets
+                  key: mysql-password
+          # tcpSocket rather than exec: mysqladmin needs a password on the
+          # command line, and a password in a probe definition is a password in
+          # the manifest and in the pod spec.
+          readinessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+            # Generous, because a first start initialises the data directory.
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: crm
+spec:
+  # Bound to the pod name, so the volume follows the identity and not the
+  # instance.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

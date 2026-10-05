@@ -1,0 +1,9 @@
+# Everything lives in its own namespace so that the whole application can be
+# removed with one command, and so that a NetworkPolicy added later has a
+# boundary to apply to.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crm
+  labels:
+    app.kubernetes.io/part-of: crm

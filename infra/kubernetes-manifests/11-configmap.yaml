@@ -1,0 +1,24 @@
+# Values that are not secret.
+#
+# Anything that would end up in a pod spec in clear text is a poor candidate for a
+# ConfigMap, because a pod spec is readable by anyone who can read pods. The
+# separation is: addresses and ports here, credentials in crm-secrets.
+#
+# Every key below is read by at least one pod. A key nothing reads is a comment
+# that will go stale, so the host name lives in the Ingress where it is used
+# rather than here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crm-config
+  namespace: crm
+  labels:
+    app.kubernetes.io/part-of: crm
+data:
+  # The links the auth service puts in its emails. They must be the address the
+  # Ingress answers on, not localhost: the reader is in a browser somewhere else.
+  activation-url: "https://crm.local/login"
+  reset-password-url: "https://crm.local/forget-password"
+
+  mail-host: smtp.gmail.com
+  mail-port: "587"
