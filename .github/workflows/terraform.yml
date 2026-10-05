@@ -266,12 +266,51 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The resource group, if it is not there yet.
+          #
+          # A resource group's region is immutable once it exists. The first run of
+          # this job created crm-state in westeurope and then failed on the storage
+          # account, because the location policy applies to the account and not to the
+          # group. So the group is now in a region the policy forbids, and
+          #
+          #   az group create --location germanywestcentral
+          #
+          # fails with InvalidResourceGroupLocation rather than moving anything.
+          #
+          # It does not need to move. A storage account is not required to sit in its
+          # resource group's region, and the azurerm backend uses the group only as a
+          # scope: it reads and writes blobs in the account. So the group is left
+          # where it is, the account is created in a region the policy allows, and the
+          # difference is reported rather than hidden.
+          #
+          # To move it after the fact the group has to be deleted and recreated, which
+          # is only safe while it is empty. It is empty here, because the account was
+          # never created, so on a fresh subscription:
+          #
+          #   az group delete -n crm-state
+          #
+          # then this job recreates it. That is deliberately not done automatically:
+          # deleting a resource group deletes everything in it, and a job that can do
+          # that unattended should not be able to.
+          if az group show --name "${RG}" >/dev/null 2>&1; then
+            existing_location="$(az group show --name "${RG}" --query location --output tsv)"
+            echo "The state resource group ${RG} already exists in ${existing_location}."
+            if [ "${existing_location}" != "${LOCATION}" ]; then
+              echo ""
+              echo "::warning::That differs from the region this run resolved (${LOCATION})."
+              echo "It is left as it is: a resource group's region cannot be changed, and"
+              echo "a storage account does not have to be in its group's region."
+            fi
+          else
+            echo "Creating the state resource group ${RG} in ${LOCATION}..."
+            az group create --name "${RG}" --location "${LOCATION}" --output none
+          fi
+
           if az storage account show --name "${ACCOUNT}" --resource-group "${RG}" >/dev/null 2>&1; then
             echo "The state account ${ACCOUNT} already exists."
             echo "created=false" >> "${GITHUB_OUTPUT}"
           else
-            echo "Creating the state resource group and account in ${LOCATION}..."
-            az group create --name "${RG}" --location "${LOCATION}" --output none
+            echo "Creating the storage account ${ACCOUNT} in ${LOCATION}..."
             az storage account create \
               --name "${ACCOUNT}" \
               --resource-group "${RG}" \
@@ -300,14 +339,22 @@ jobs:
             echo "Created the container ${CONTAINER}."
           fi
 
+          # Computed before the summary rather than inside it. A command substitution
+          # wrapping a double-quoted string, inside a double-quoted echo, is quoting
+          # that works until it does not, and a broken summary is not worth the
+          # cleverness.
+          rg_location="$(az group show --name "${RG}" --query location --output tsv 2>/dev/null || echo unknown)"
+          account_location="$(az storage account show --name "${ACCOUNT}" --resource-group "${RG}" --query location --output tsv 2>/dev/null || echo unknown)"
+
           {
             echo "## State storage"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| resource group | \`${RG}\` |"
-            echo "| location | \`${LOCATION}\` |"
+            echo "| resource group region | \`${rg_location}\` |"
             echo "| storage account | \`${ACCOUNT}\` |"
+            echo "| storage account region | \`${account_location}\` |"
             echo "| container | \`${CONTAINER}\` |"
             echo "| created now | ${ACCOUNT} |"
             echo ""
