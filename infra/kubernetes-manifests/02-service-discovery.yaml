@@ -49,18 +49,30 @@ spec:
               value: http://service-discovery:8761/eureka/
             - name: EUREKA_INSTANCE_HOSTNAME
               value: service-discovery
+          # Startup, readiness and liveness, like every other workload. The grace
+          # matters here more than anywhere else: every service in the application
+          # registers against this one, so restarting it late makes all of them fail
+          # to register at the same moment.
+          #
+          # While the startup probe is failing, the two below are not run at all.
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            failureThreshold: 10
+            periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8761
-            initialDelaySeconds: 40
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8761
-            initialDelaySeconds: 90
+            # No initialDelaySeconds: the startup probe is what holds this off.
             periodSeconds: 20
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m

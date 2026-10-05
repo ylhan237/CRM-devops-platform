@@ -140,15 +140,25 @@ mysql:
       cpu: "1"
       memory: 1Gi
 
-  # A first start initialises the data directory, which takes a while. Generous
-  # delays, because a probe that is too eager restarts a database that was on its
-  # way up.
+  # Three probes, and the startup one is not optional for a database.
+  #
+  # A first start initialises the data directory, which on a 5 GiB claim takes long
+  # enough that the liveness probe used to kill it. That is what the generous
+  # initialDelaySeconds was standing in for, and it was wrong in both directions: far
+  # too long for every restart after the first, and not long enough on a slow disk.
+  #
+  # 30 attempts every 10 seconds is 5 minutes. A container that has not opened its port
+  # in 5 minutes is not slow, it is broken, and restarting it is the right answer
+  # rather than a way to hide it.
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 10
+  # No initialDelaySeconds below: the startup probe is what holds them off.
   readinessProbe:
-    initialDelaySeconds: 20
     periodSeconds: 10
   livenessProbe:
-    initialDelaySeconds: 90
     periodSeconds: 20
+    failureThreshold: 3
 
 # ------------------------------------------------------------------ config ----
 

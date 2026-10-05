@@ -72,18 +72,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.frontend.port }}
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
+          # The helper, with probeStyle "/", because nginx answers on / without an
+          # application behind it. It is the only workload in this chart where an HTTP
+          # health check is honest; everywhere else the port is only proven open.
+          {{- include "crm.backendProbes" (dict "port" "http" "probeStyle" "/" "readiness" (dict "periodSeconds" 10) "liveness" (dict "periodSeconds" 20 "failureThreshold" 3) "startup" (dict "failureThreshold" 5 "periodSeconds" 12)) | nindent 10 }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       {{- include "crm.scheduling" . | nindent 6 }}

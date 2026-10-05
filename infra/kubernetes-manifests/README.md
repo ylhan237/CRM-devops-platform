@@ -50,6 +50,32 @@ kubectl apply -k .
 kubectl -n crm get pods -w
 ```
 
+## Three probes, not two
+
+`note.md` asks for "les liveness, readiness, startup probes". The first two are
+enough to read a Deployment, and that is exactly the trap: **the startup probe is the
+one that makes the other two safe to tune.**
+
+While it is failing, Kubernetes does not run the liveness or the readiness probe at
+all. So liveness can be aggressive without becoming a way to kill a container that is
+still booting.
+
+Without it, liveness has to carry an `initialDelaySeconds` long enough for the slowest
+start. That is wrong in both directions: far too long for every restart after the
+first, and not long enough on a cold VM waiting for a MySQL. These manifests carried
+`initialDelaySeconds: 90`, which was the delay standing in for the probe that was
+missing.
+
+| Workload | startup | Grace |
+|---|---|---|
+| the 7 Spring services, the frontend | 5 × 12 s | 60 s |
+| `service-discovery` | 10 × 10 s | 100 s |
+| MySQL | 30 × 10 s | 5 min |
+
+MySQL is the one where this is not negotiable: a first start initialises the data
+directory, and the liveness probe was killing it. A container that has not opened its
+port in 5 minutes is not slow, it is broken.
+
 ## Three decisions worth arguing about
 
 **MySQL is a StatefulSet, not a Deployment.** A Deployment may replace its pod

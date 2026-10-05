@@ -86,7 +86,7 @@ spec:
             - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
               value: "http://{{ $.Values.serviceDiscovery.name }}:{{ $.Values.serviceDiscovery.port }}/eureka/"
             {{- include "crm.serviceEnv" (dict "root" $ "service" $svc) | nindent 12 }}
-          {{- include "crm.backendProbes" (dict "port" "http" "readiness" ($probes.readiness | default (dict "initialDelaySeconds" 40 "periodSeconds" 10)) "liveness" ($probes.liveness | default (dict "initialDelaySeconds" 90 "periodSeconds" 20))) | nindent 10 }}
+          {{- include "crm.backendProbes" (dict "port" "http" "readiness" ($probes.readiness | default (dict "periodSeconds" 10)) "liveness" ($probes.liveness | default (dict "periodSeconds" 20 "failureThreshold" 3)) "startup" ($probes.startup | default (dict "failureThreshold" 5 "periodSeconds" 12))) | nindent 10 }}
           resources:
             {{- toYaml (default (dict "requests" (dict "cpu" "200m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "1Gi")) $svc.resources) | nindent 12 }}
           {{- with $svc.emptyDirs }}

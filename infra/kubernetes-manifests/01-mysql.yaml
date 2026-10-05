@@ -75,17 +75,37 @@ spec:
           # tcpSocket rather than exec: mysqladmin needs a password on the
           # command line, and a password in a probe definition is a password in
           # the manifest and in the pod spec.
+          # A database is the one workload where the startup probe is not optional.
+          #
+          # A first start initialises the data directory, which on a 5 GiB claim takes
+          # long enough that the liveness probe was killing it. That is why this one
+          # had a generous initialDelaySeconds: the delay was standing in for the
+          # missing startup probe, and it was wrong in both directions, being far too
+          # long for every restart after the first and not long enough on a slow disk.
+          #
+          # 30 attempts every 10 seconds is 5 minutes. A container that has not opened
+          # its port in 5 minutes is not slow, it is broken, and restarting it is the
+          # right answer rather than a way to hide it.
+          #
+          # tcpSocket and not exec mysqladmin: mysqladmin needs a password on the
+          # command line, and a password in a probe definition is a password in the
+          # manifest and in the pod spec.
+          startupProbe:
+            tcpSocket:
+              port: 3306
+            failureThreshold: 30
+            periodSeconds: 10
           readinessProbe:
             tcpSocket:
               port: 3306
-            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 3306
-            # Generous, because a first start initialises the data directory.
-            initialDelaySeconds: 90
+            # No initialDelaySeconds: the startup probe holds this off for as long as
+            # the database legitimately needs.
             periodSeconds: 20
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m

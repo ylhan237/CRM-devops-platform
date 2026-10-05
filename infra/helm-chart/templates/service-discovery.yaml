@@ -69,21 +69,16 @@ spec:
               value: "http://{{ .Values.serviceDiscovery.name }}:{{ .Values.serviceDiscovery.port }}/eureka/"
             - name: EUREKA_INSTANCE_HOSTNAME
               value: {{ .Values.serviceDiscovery.name | quote }}
+          {{- /*
+            One helper, both branches, rather than a hand-written pair in the actuator
+            case. The two branches only ever differed in whether the probe was httpGet
+            or tcpSocket, which is now the probeStyle argument, and keeping a second
+            copy of the numbers is how they drift apart.
+          */}}
           {{- if .Values.serviceDiscovery.actuator }}
-          readinessProbe:
-            httpGet:
-              path: /actuator/health
-              port: http
-            initialDelaySeconds: 40
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /actuator/health
-              port: http
-            initialDelaySeconds: 90
-            periodSeconds: 20
+          {{- include "crm.backendProbes" (dict "port" "http" "probeStyle" "/actuator/health" "readiness" (dict "periodSeconds" 10) "liveness" (dict "periodSeconds" 20 "failureThreshold" 3) "startup" (dict "failureThreshold" 10 "periodSeconds" 10)) | nindent 10 }}
           {{- else }}
-          {{- include "crm.backendProbes" (dict "port" .Values.serviceDiscovery.port "readiness" (dict "initialDelaySeconds" 40 "periodSeconds" 10) "liveness" (dict "initialDelaySeconds" 90 "periodSeconds" 20)) | nindent 10 }}
+          {{- include "crm.backendProbes" (dict "port" "http" "readiness" (dict "periodSeconds" 10) "liveness" (dict "periodSeconds" 20 "failureThreshold" 3) "startup" (dict "failureThreshold" 10 "periodSeconds" 10)) | nindent 10 }}
           {{- end }}
           resources:
             {{- toYaml .Values.serviceDiscovery.resources | nindent 12 }}

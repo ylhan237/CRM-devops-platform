@@ -87,7 +87,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.name }}
                   key: mysql-password
-          {{- include "crm.backendProbes" (dict "port" .Values.mysql.port "readiness" .Values.mysql.readinessProbe "liveness" .Values.mysql.livenessProbe) | nindent 10 }}
+          {{- include "crm.backendProbes" (dict "port" .Values.mysql.port "readiness" .Values.mysql.readinessProbe "liveness" .Values.mysql.livenessProbe "startup" .Values.mysql.startupProbe) | nindent 10 }}
           resources:
             {{- toYaml .Values.mysql.resources | nindent 12 }}
           volumeMounts:
