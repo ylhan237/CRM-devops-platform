@@ -1,0 +1,93 @@
+# nginx configuration template.
+#
+# This file is processed by envsubst when the container starts, because the
+# official nginx image renders everything under /etc/nginx/templates/*.template
+# into /etc/nginx/conf.d/*.conf. The ${...} placeholders below are therefore
+# replaced with values from the environment.
+#
+# It must be a template rather than a plain conf file for two reasons:
+#
+# 1. resolver is not a Docker-only concept.
+#    127.0.0.11 is Docker's embedded DNS, and it exists only on a
+#    user-defined network. Hardcoding it would work under Compose but fail in
+#    Kubernetes, where cluster DNS lives at the CoreDNS Service IP taken from
+#    /etc/resolv.conf. NGINX_RESOLVER is therefore injected per environment.
+#
+# 2. proxy_pass has to use a variable.
+#    With a literal host such as proxy_pass http://api-gateway:8060, nginx
+#    resolves the name once while loading the configuration and refuses to
+#    start when it is unknown:
+#      [emerg] host not found in upstream "api-gateway"
+#    That made the image unusable on its own, broke any smoke test that starts
+#    only the frontend, and meant nginx would not restart while the gateway was
+#    absent from DNS. A variable defers the lookup to request time, so nginx
+#    starts regardless and only the calls that truly cannot reach the gateway
+#    fail, with a 502.
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    # ── Upstream resolution ───────────────────────────────────────────────────
+    # valid=30s bounds how long a DNS change goes unnoticed. ipv6=off avoids
+    # needless AAAA lookups against Docker's embedded resolver.
+    resolver ${NGINX_RESOLVER} valid=30s ipv6=off;
+
+    # Host and port of the API gateway, as a Service name under Compose or
+    # Kubernetes rather than a container IP, so a restart under a new address is
+    # picked up automatically.
+    set $api_gateway_upstream http://${API_GATEWAY_HOST}:${API_GATEWAY_PORT};
+
+    # Same headers everywhere, written once so a new location block cannot
+    # silently omit them.
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+
+    # Bound the failure instead of letting a dead gateway pin connections open.
+    proxy_connect_timeout 5s;
+    proxy_send_timeout    60s;
+    proxy_read_timeout    60s;
+
+    # ── API ───────────────────────────────────────────────────────────────────
+    #
+    # $request_uri is appended by hand because using a variable in proxy_pass
+    # stops nginx from appending the matched location prefix. Without it,
+    # /api/v1/auth/authenticate would be forwarded as /authenticate.
+    #
+    # The gateway routes /api/v1 to the auth service, /api/candidates to the
+    # student service, /api/notifications to the notification service, /tasks to
+    # the task service and /api/events, /api/venues, /api/event-types and
+    # /api/contacts to the event service.
+    location /api/ {
+        proxy_pass $api_gateway_upstream$request_uri;
+    }
+
+    location /tasks/ {
+        proxy_pass $api_gateway_upstream$request_uri;
+    }
+
+    # ── Static assets and Angular routing ─────────────────────────────────────
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # ── Health probe ──────────────────────────────────────────────────────────
+    # Used by the Docker HEALTHCHECK and by the Kubernetes probes. It answers
+    # without contacting the gateway, so it reports on nginx itself rather than
+    # on a dependency.
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+}
