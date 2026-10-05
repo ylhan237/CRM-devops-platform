@@ -1,14 +1,7 @@
 package org.crm.student.application_management_service.model;
 
-
-import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
-
 
 @Entity
 @Table(name = "parent_details")
@@ -26,5 +19,4 @@ public class Parent {
 
     private String relationshipToCandidate;
 }
-
 

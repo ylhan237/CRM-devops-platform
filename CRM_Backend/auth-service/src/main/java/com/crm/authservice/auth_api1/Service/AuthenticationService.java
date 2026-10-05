@@ -21,10 +21,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
-
-import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -48,8 +45,6 @@ public class AuthenticationService {
     private String activationUrl;
     @Value("${application.mailing.frontend.reset-password-url}")
     private String resetUrl;
-
-
 
     // Upload user image
 
@@ -78,7 +73,6 @@ public class AuthenticationService {
         }
     }
 
-
     // Delete User method
     @Transactional
     public void deleteUser(Integer userId) {
@@ -91,7 +85,6 @@ public class AuthenticationService {
         // Delete the user
         userRepository.delete(user);
     }
-
 
     // Get All Users method
     public List<User> getAllUsers() {
@@ -226,9 +219,6 @@ public class AuthenticationService {
         userRepository.save(user);
     }
 
-
-
-
     private String generateAndSavePasswordResetToken(User user) {
         String generatedToken = generateActivationCode(6);
         Token token = Token.builder()
@@ -240,7 +230,6 @@ public class AuthenticationService {
         tokenRepository.save(token);
         return generatedToken;
     }
-
 
     public void sendPasswordResetToken(String email) throws MessagingException {
         User user = userRepository.findByEmail(email)
@@ -258,8 +247,6 @@ public class AuthenticationService {
                 null
         );
     }
-
-
 
     public String resetPasswordWithToken(String token, String newPassword) {
         // Retrieve the token from the repository
@@ -312,7 +299,6 @@ public class AuthenticationService {
         }
     }
 
-
     public User getUserInfoFromToken(String token) {
         // Extract email or username from the token
         String email = jwtService.extractUsername(token);
@@ -321,7 +307,6 @@ public class AuthenticationService {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + email));
     }
-
 
     @Transactional
     public void logout(String token) {
@@ -332,10 +317,6 @@ public class AuthenticationService {
             tokenRepository.save(savedToken); // Update the token status in the database
         }
     }
-
-
-
-
 
     public User getUserByEmail(String email) {
         return userRepository.findByEmail(email)

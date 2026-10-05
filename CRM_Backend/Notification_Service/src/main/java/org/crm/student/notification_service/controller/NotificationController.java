@@ -3,7 +3,6 @@ package org.crm.student.notification_service.controller;
 import jakarta.mail.MessagingException;
 import org.crm.student.notification_service.models.EmailNotificationRequest;
 import org.crm.student.notification_service.models.SmsNotificationRequest;
-import org.crm.student.notification_service.models.WhatsAppNotificationRequest;
 import org.crm.student.notification_service.services.EmailNotificationService;
 import org.crm.student.notification_service.services.SmsNotificationService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,7 +10,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -81,7 +79,5 @@ public class NotificationController {
             return ResponseEntity.status(500).body("Failed to send task completion email: " + e.getMessage());
         }
     }
-
-
 
 }

@@ -2,11 +2,6 @@ package org.crm.student.application_management_service.model;
 
 import com.opencsv.bean.CsvBindByName;
 import com.opencsv.bean.CsvCustomBindByName;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import com.opencsv.bean.CsvBindByName;
 import lombok.Data;
@@ -59,7 +54,6 @@ public class CandidateCSV {
     @CsvBindByName(column = "parentRelationship")
     private String parentRelationship;
 
-
     // Employment details
     @CsvBindByName(column = "companyName")
     private String companyName;
@@ -79,8 +73,6 @@ public class CandidateCSV {
 
     @CsvBindByName(column = "fieldOfStudy")
     private String fieldOfStudy;
-
-
 
     private Status parseStatus(String status) {
         try {
