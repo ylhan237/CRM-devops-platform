@@ -102,6 +102,32 @@ variable "application_ports" {
   EOT
   type        = list(number)
   default     = [6443, 8060, 8080, 8082, 8084, 8085, 8089, 8761]
+
+  validation {
+    # A repeated port produces two rules with different priorities and the same
+    # destination, and Azure lets them coexist, so nothing complains and one of them
+    # is unreachable. Refusing it here is cheaper than finding that out later.
+    condition     = length(distinct(var.application_ports)) == length(var.application_ports)
+    error_message = "application_ports contains a duplicate. Each port may appear once."
+  }
+
+  validation {
+    # 22 is excluded because SSH already has a rule at priority 100, and two rules for
+    # one port means one of them is ignored without any warning.
+    condition = alltrue([
+      for port in var.application_ports :
+      port >= 1 && port <= 65535 && port != 22
+    ])
+    error_message = "Each port must be between 1 and 65535, and must not be 22, which the SSH rule already covers."
+  }
+
+  validation {
+    # Azure accepts priorities from 100 to 4096 and the rules start at 200, so a list
+    # longer than 3896 puts the last rule out of range. The first version derived the
+    # priority from the port number and the kubeadm port alone produced 6643.
+    condition     = length(var.application_ports) <= 3896
+    error_message = "Too many ports: priorities start at 200 and Azure rejects anything above 4096, so the list may hold at most 3896 entries."
+  }
 }
 
 variable "vm_disk_size_gb" {

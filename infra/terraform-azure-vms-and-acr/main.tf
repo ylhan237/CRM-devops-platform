@@ -16,8 +16,15 @@ locals {
 
   # Ports the services listen on, named so the security group rules read as
   # something rather than as a list of numbers.
-  application_rules = { for port in var.application_ports : port => {
-    port = port
+  #
+  # The priority is 200 + position, not 200 + port. Azure only accepts priorities
+  # between 100 and 4096, and deriving it from the port number gives 6643 for the
+  # kubeadm port and 8961 for the service registry, which the provider rejects. Both
+  # of those were rejected on the first plan, so the numbers a reader would expect
+  # to see in a security group are not the numbers Azure will take.
+  application_rules = { for position, port in var.application_ports : port => {
+    port     = port
+    priority = 200 + position
   } }
 
   # Installed by cloud-init on first boot.
@@ -133,7 +140,7 @@ resource "azurerm_network_security_group" "crm" {
     content {
       name                       = "app-${security_rule.value.port}"
       description                = "Application port ${security_rule.value.port}"
-      priority                   = 200 + security_rule.value.port
+      priority                   = security_rule.value.priority
       direction                  = "Inbound"
       access                     = "Allow"
       protocol                   = "Tcp"
