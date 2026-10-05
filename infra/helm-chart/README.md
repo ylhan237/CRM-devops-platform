@@ -6,6 +6,52 @@ MySQL as a StatefulSet, probes everywhere, TLS on the Ingress.
 
 Branch `infra/add-helm-chart`.
 
+## Publishing it
+
+`note.txt` 9 asks for a release and a publication once the chart exists. The
+workflow `.github/workflows/publish-chart.yml` does that, on a `chart-v*` tag:
+
+```bash
+helm show chart infra/helm-chart | grep version   # say 0.1.0
+# bump version in Chart.yaml, commit, then
+git tag chart-v0.1.0
+git push origin chart-v0.1.0
+```
+
+It packages the chart and attaches the `.tgz` to a GitHub release, which Helm reads
+directly. Installing then needs no clone:
+
+```bash
+helm repo add crm https://ylhan237.github.io/CRM-devops-platform
+helm repo update
+helm install crm crm/crm --version 0.1.0
+```
+
+`version` and `appVersion` are separate on purpose. `appVersion` is the release the
+images were published under; `version` is the packaging. Bumping only `appVersion`
+gives new images with no change to the chart and therefore no chart release. The
+workflow refuses to publish if the tag and `Chart.yaml` disagree, since
+`--version 0.1.0` resolving to nothing is a bad way to find that out.
+
+**Not a dedicated repository.** `note.txt` says one is an option. A separate repo
+would mean publishing the chart from two places, and the chart refers to image
+versions that live here. The releases URL already serves it; splitting it is a change
+to make when two charts need independent versioning.
+
+Three things are checked before anything is published, because a published artefact
+is harder to retract than a fixed commit:
+
+- `helm lint --strict`
+- the rendered chart still produces **nine** workloads. `helm package` does not check
+  this, and a chart that packages while rendering four of its nine Deployments is a
+  release nobody notices until it is installed
+- the `.tgz` contains no `tls.key`, `tls.crt`, `.env` or `terraform.tfvars`. The
+  archive is the artefact, so its contents are inspected rather than the directory's:
+  a `.helmignore` that stops matching ships a credential silently
+
+Verified: `helm lint --strict` passes, `helm template` renders the nine workloads,
+and `helm package` produces a 16-file archive with no credential in it.
+
 ## Why both, and not one
 
 The plain manifests are the reference. They are readable top to bottom, which is
