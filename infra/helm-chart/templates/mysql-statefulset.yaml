@@ -1,0 +1,135 @@
+{{- /*
+MySQL as a StatefulSet.
+
+A StatefulSet rather than a Deployment, because a Deployment may replace its pod
+and come back with an empty volume: the volume follows the pod name and a new pod
+has a new name. A StatefulSet gives the pod a stable identity, a stable DNS name,
+and a claim that follows it.
+
+Note the two different places the two volumes live, because getting this wrong is
+silent rather than loud:
+
+  volumeClaimTemplates   is a child of the StatefulSet spec
+  volumes                is a child of the pod template spec
+
+Indenting volumeClaimTemplates under the pod produces a chart that renders
+without error and is rejected by the API server, which is the worst of both.
+*/ -}}
+{{- if .Values.mysql.enabled }}
+{{- $fullName := include "crm.fullname" . -}}
+{{- $hasInit := .Values.mysql.initDatabase -}}
+{{- $hasEmptyDir := and (not .Values.mysql.persistence.enabled) .Values.mysql.persistence.allowEmptyDir -}}
+{{- if not .Values.mysql.persistence.enabled }}
+{{- if not .Values.mysql.persistence.allowEmptyDir }}
+{{- fail "mysql.persistence is disabled and mysql.persistence.allowEmptyDir is false. A MySQL with no volume loses its data on every restart; either enable persistence or acknowledge the loss explicitly." }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullName }}-mysql
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+spec:
+  serviceName: {{ $fullName }}-mysql
+  # Never two. MySQL behind a ReadWriteOnce volume has one writer, and a second
+  # replica would be a second writer waiting to be told no.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "crm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mysql
+  {{- if .Values.mysql.persistence.enabled }}
+  {{- if .Values.mysql.persistence.retainOnDelete }}
+  # Retain by default, and not by omission: without this, `helm uninstall` deletes
+  # the claim along with the StatefulSet, and a reinstall comes back with an
+  # empty database that looks like a working one until a query returns nothing.
+  # Requires apps/v1, available since Kubernetes 1.27, which kubeVersion enforces.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  {{- end }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "crm.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mysql
+    spec:
+      {{- include "crm.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: mysql
+          image: "{{ .Values.mysql.image }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: mysql
+              containerPort: {{ .Values.mysql.port }}
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: mysql-database
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: mysql-password
+          {{- include "crm.backendProbes" (dict "port" .Values.mysql.port "readiness" .Values.mysql.readinessProbe "liveness" .Values.mysql.livenessProbe) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            {{- if $hasInit }}
+            # The whole directory rather than one mount per file with subPath.
+            # A subPath mount is a bind of a single file as it was at pod start,
+            # so it would not see a file added by a later upgrade until the pod
+            # was recreated, and would be quietly stale in the meantime.
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            {{- end }}
+      {{- if or $hasInit $hasEmptyDir }}
+      volumes:
+        {{- if $hasInit }}
+        - name: init
+          configMap:
+            name: {{ $fullName }}-mysql-init
+        {{- end }}
+        {{- if $hasEmptyDir }}
+        # Data is gone when the pod is. Only reachable by setting
+        # allowEmptyDir, because a database on an emptyDir that nobody realises is
+        # on an emptyDir is worse than a database that does not start.
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+      {{- include "crm.scheduling" . | nindent 6 }}
+  {{- if .Values.mysql.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.mysql.persistence.size }}
+        {{- if .Values.mysql.persistence.storageClass }}
+        storageClassName: {{ .Values.mysql.persistence.storageClass | quote }}
+        {{- end }}
+  {{- end }}
+{{- end }}

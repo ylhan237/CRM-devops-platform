@@ -1,0 +1,23 @@
+# Files that have no business inside a packaged chart.
+#
+# helm package copies everything that is not listed here, so a stray values file
+# holding real credentials would end up in the .tgz and in a chart repository.
+
+.git/
+.gitignore
+.github/
+
+# Credential material. tls.key is the one that matters most: a private key in a
+# chart is readable by anyone who can pull the chart.
+*.key
+*.crt
+*.pem
+tls.key
+tls.crt
+crm-secrets*
+values.local.yaml
+values.*.local.yaml
+
+# Operator notes. Not secrets, but not part of the application either.
+README.md
+docs/

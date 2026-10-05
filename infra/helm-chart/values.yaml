@@ -1,0 +1,430 @@
+# Values for the crm chart.
+#
+#   helm install crm infra/helm-chart -f values.yaml
+#
+# Two environments means two values files, not a second chart and not an edited
+# template:
+#
+#   helm install crm     infra/helm-chart -f values.yaml
+#   helm install crm-dev infra/helm-chart -f examples/dev-values.yaml
+#
+# Everything that is a credential is not in this file and has no default. The
+# chart refuses to render rather than render a placeholder, because a
+# placeholder that reaches a pod is a credential that leaks.
+
+# ------------------------------------------------------------------ global ----
+
+global:
+  # Registry the images are pulled from. The release workflow publishes to GHCR
+  # and mirrors to the Azure registry, so either host works as long as the
+  # matching pull secret exists in the namespace.
+  imageRegistry: ghcr.io/ylhan237
+  imagePullPolicy: IfNotPresent
+
+  # `latest` follows the branch. Pin it to a release tag to make a deployment
+  # repeatable, which is the difference between deploying twice and deploying
+  # the same thing twice.
+  imageTag: latest
+
+  # Set when the registry is private. Left empty on purpose: an empty value is a
+  # field that exists but does nothing, whereas a placeholder would be a pull
+  # that fails with a confusing error. The Secret itself is created out of band,
+  # because an imagePullSecret holds a registry password.
+  imagePullSecret: ""
+
+  # Applied to every object. Useful for a cost dashboard or a policy selector.
+  commonLabels: {}
+
+# ------------------------------------------------------------------ secret ----
+
+secrets:
+  # The Secret every credential is read from.
+  name: crm-secrets
+
+  # false by default, and this is the important line in this file.
+  #
+  # When false the chart does not create the Secret and does not ask for its
+  # values. It is created out of band, by hand:
+  #
+  #   kubectl create namespace crm
+  #   kubectl -n crm create secret generic crm-secrets \
+  #     --from-literal=jwt-secret-key="$(openssl rand -base64 32)" \
+  #     --from-literal=db-username=... --from-literal=db-password=... \
+  #     --from-literal=mysql-root-password=... --from-literal=mysql-database=authdb \
+  #     --from-literal=mysql-user=... --from-literal=mysql-password=... \
+  #     --from-literal=mail-username=... --from-literal=mail-password=...
+  #
+  # `create: true` exists for a throwaway lab and renders the credentials into a
+  # Secret and, with `--debug`, into the terminal and into the Helm release
+  # stored in the cluster. That is acceptable once and never on a registry.
+  create: false
+
+  # Only read when create is true. Required, so a half-filled values file fails
+  # at install rather than producing a pod that cannot connect to anything.
+  jwtSecretKey: ""
+  dbUsername: ""
+  dbPassword: ""
+  mysqlRootPassword: ""
+  mysqlUser: ""
+  mysqlPassword: ""
+  mailUsername: ""
+  mailPassword: ""
+
+# ------------------------------------------------------------------ mysql ----
+
+mysql:
+  enabled: true
+  image: mysql:8.0
+  port: 3306
+
+  # A StatefulSet rather than a Deployment: a Deployment may replace its pod and
+  # come back with an empty volume, because the volume follows the pod name and a
+  # new pod has a new name.
+  #
+  # Persistent, so `helm uninstall` deletes the claim along with the
+  # StatefulSet. Uncommenting this makes an uninstall keep the data, which is
+  # usually what is wanted and is never what is expected after the fact.
+  # Requires apps/v1, Kubernetes 1.27 or newer, which kubeVersion enforces.
+  persistence:
+    enabled: true
+    size: 5Gi
+    # Empty means "whatever the cluster defaults to". A kubeadm cluster usually
+    # has no default StorageClass, in which case the claim stays Pending until
+    # one is created. That is stated rather than worked around, because a
+    # provisioner has to be installed deliberately.
+    storageClass: ""
+    # On a real cluster this should never be used. It is here so the chart can
+    # be rendered and demonstrated on a cluster with no provisioner at all, and
+    # turning it on requires saying so explicitly.
+    allowEmptyDir: false
+    retainOnDelete: true
+
+  # Scripts mounted at /docker-entrypoint-initdb.d, which MySQL runs once, on an
+  # empty data directory. They create the schemas and grant what each service
+  # needs, which is otherwise four services failing with "access denied" that
+  # reads like a password problem.
+  initDatabase: true
+  initScripts:
+    # The account the grants are given to.
+    #
+    # A .sql file cannot read an environment variable, so the name has to be
+    # known when the chart renders. Leave it empty when secrets.create is true,
+    # because then the chart already holds the value and uses it directly.
+    #
+    # With both empty, the schema script is still rendered but the grants are
+    # not, and NOTES.txt prints the statements to run. That is a real, reachable
+    # state needing one manual command, which is better than rendering
+    # `GRANT ... TO ''@'%'`, which fails at first boot with a message about
+    # authentication when the real problem is an empty name.
+    grantUser: ""
+
+    # Each entry creates one schema and grants the account on it.
+    authService:
+      enabled: true
+      schema: authdb
+    studentService:
+      enabled: true
+      schema: candidate
+    taskService:
+      enabled: true
+      schema: task
+    eventService:
+      enabled: true
+      schema: event_system
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # A first start initialises the data directory, which takes a while. Generous
+  # delays, because a probe that is too eager restarts a database that was on its
+  # way up.
+  readinessProbe:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+  livenessProbe:
+    initialDelaySeconds: 90
+    periodSeconds: 20
+
+# ------------------------------------------------------------------ config ----
+
+config:
+  # Name of the ConfigMap the non-secret values are read from. Empty means the
+  # chart derives it from the release name, which is right unless something
+  # outside this chart has to read it.
+  name: ""
+
+  # The links the auth service puts in its emails. They must be the address the
+  # Ingress answers on, not localhost: the reader is in a browser somewhere else.
+  activationUrl: "https://crm.local/login"
+  resetPasswordUrl: "https://crm.local/forget-password"
+
+  mailHost: smtp.gmail.com
+  mailPort: "587"
+
+# --------------------------------------------------------- service registry ----
+
+serviceDiscovery:
+  enabled: true
+  name: service-discovery
+  port: 8761
+  # One replica. Eureka holds its registry in memory, and two replicas would each
+  # hold a different view of it.
+  replicas: 1
+  # Only this service carries the Spring actuator starter, so it is the only one
+  # that can answer an HTTP health check. This is why its probes are httpGet and
+  # everyone else's are tcpSocket.
+  actuator: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+# ------------------------------------------------------- business services ----
+
+# The five Spring Boot services that talk to the database or the registry.
+# Rendered by a single range, which is the reason to use a chart: adding a
+# service is an entry here, not a new template file.
+#
+# A MAP keyed by service name, not a list, and that is deliberate. Helm merges
+# maps key by key and merges lists element by element, so overriding one entry of
+# a list means restating the whole list at the same indexes: add a sixth service
+# here and every environment that overrode `replicas` by list position would
+# silently apply it to the wrong service or drop one entirely. As a map,
+#
+#   backendServices:
+#     auth-service:
+#       replicas: 1
+#
+# changes one number and leaves everything else alone.
+#
+# The gateway and the frontend are separate keys because neither has a database.
+backendServices:
+  auth-service:
+    port: 8080
+    # Two replicas. The upload directory is an emptyDir, so a photo written by
+    # one replica is invisible to the other: availability is bought at the cost
+    # of the uploads being inconsistent. Set to 1 and point uploads at a claim if
+    # the photos matter more.
+    replicas: 2
+    springProfile: prod
+    env:
+      - name: SPRING_DATASOURCE_URL
+        value: "jdbc:mysql://mysql:3306/authdb?createDatabaseIfNotExist=true"
+      - name: SPRING_DATASOURCE_USERNAME
+        secretKey: db-username
+      - name: SPRING_DATASOURCE_PASSWORD
+        secretKey: db-password
+      - name: JWT_SECRET_KEY
+        secretKey: jwt-secret-key
+      - name: ACTIVATION_URL
+        configMapKey: activation-url
+      - name: RESET_PASSWORD_URL
+        configMapKey: reset-password-url
+      - name: FILE_UPLOAD_DIR
+        value: /var/lib/crm/uploads
+      - name: MAIL_HOST
+        configMapKey: mail-host
+      - name: MAIL_PORT
+        configMapKey: mail-port
+      - name: MAIL_USERNAME
+        secretKey: mail-username
+      - name: MAIL_PASSWORD
+        secretKey: mail-password
+    emptyDirs:
+      - name: uploads
+        mountPath: /var/lib/crm/uploads
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  student-service:
+    port: 8082
+    # One replica, because of the upload directory. Same reasoning as above.
+    replicas: 1
+    springProfile: prod
+    env:
+      - name: SPRING_DATASOURCE_URL
+        value: "jdbc:mysql://mysql:3306/candidate?createDatabaseIfNotExist=true&maxAllowedPacket=16777216"
+      - name: SPRING_DATASOURCE_USERNAME
+        secretKey: db-username
+      - name: SPRING_DATASOURCE_PASSWORD
+        secretKey: db-password
+      - name: FILE_UPLOAD_DIR
+        value: /var/lib/crm/uploads
+    emptyDirs:
+      - name: uploads
+        mountPath: /var/lib/crm/uploads
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  task-service:
+    port: 8084
+    replicas: 1
+    springProfile: prod
+    env:
+      - name: SPRING_DATASOURCE_URL
+        value: "jdbc:mysql://mysql:3306/task?createDatabaseIfNotExist=true"
+      - name: SPRING_DATASOURCE_USERNAME
+        secretKey: db-username
+      - name: SPRING_DATASOURCE_PASSWORD
+        secretKey: db-password
+      # Resolves to the in-cluster Service, not to a name in compose.
+      - name: STUDENT_SERVICE_URL
+        value: "http://student-service:8082/"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 384Mi
+      limits:
+        cpu: "1"
+        memory: 768Mi
+
+  notification-service:
+    port: 8085
+    replicas: 1
+    springProfile: prod
+    env:
+      - name: SPRING_MAIL_HOST
+        configMapKey: mail-host
+      - name: SPRING_MAIL_PORT
+        configMapKey: mail-port
+      - name: SPRING_MAIL_USERNAME
+        secretKey: mail-username
+      - name: SPRING_MAIL_PASSWORD
+        secretKey: mail-password
+      # Optional: marked so, the pod starts whether or not the keys exist. Only
+      # the SMS path goes quiet, which is the right failure for a channel that
+      # was never configured.
+      - name: TWILIO_ACCOUNT_SID
+        secretKey: twilio-account-sid
+        optional: true
+      - name: TWILIO_AUTH_TOKEN
+        secretKey: twilio-auth-token
+        optional: true
+      - name: TWILIO_PHONE_NUMBER
+        secretKey: twilio-phone-number
+        optional: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 384Mi
+      limits:
+        cpu: "1"
+        memory: 768Mi
+
+  event-service:
+    port: 8089
+    replicas: 1
+    springProfile: prod
+    env:
+      - name: SPRING_DATASOURCE_URL
+        value: "jdbc:mysql://mysql:3306/event_system?createDatabaseIfNotExist=true&maxAllowedPacket=16777216"
+      - name: SPRING_DATASOURCE_USERNAME
+        secretKey: db-username
+      - name: SPRING_DATASOURCE_PASSWORD
+        secretKey: db-password
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# ------------------------------------------------------------------ gateway ----
+
+gateway:
+  name: api-gateway
+  port: 8060
+  # Two replicas, no local state.
+  replicas: 2
+  springProfile: prod
+  # The routes this gateway forwards, rendered as a Deployment annotation so
+  # `kubectl describe` can answer without running the image. The routes are baked
+  # into the image rather than configured here, so this is documentation, and it
+  # is checked against the image in the README rather than trusted: the four event
+  # routes were missing until a branch added them.
+  routes:
+    - /api/v1/auth/**
+    - /api/v1/student/**
+    - /api/v1/task/**
+    - /api/v1/notification/**
+    - /api/v1/event/**
+    - /api/v1/profile-photo/**
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+# ---------------------------------------------------------------- frontend ----
+
+frontend:
+  name: frontend
+  port: 80
+  # Two replicas: a static bundle with no state.
+  replicas: 2
+  # nginx resolves the gateway upstream at start-up, so a gateway Service that
+  # does not exist yet makes nginx refuse to start. The initContainer waits for
+  # it rather than letting the pod crash-loop while the gateway comes up.
+  waitForGateway: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ----------------------------------------------------------------- ingress ----
+
+ingress:
+  enabled: true
+  className: nginx
+  host: crm.local
+
+  # Lets the gateway serve the 8 MiP candidate documents that the default 1 MiB
+  # would refuse.
+  proxyBodySize: "16m"
+  proxyReadTimeout: "120"
+  proxySendTimeout: "120"
+
+  tls:
+    enabled: true
+    # The Ingress references this Secret by name. It is created out of band:
+    #
+    #   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    #     -keyout tls.key -out tls.crt -subj "/CN=crm.local" \
+    #     -addext "subjectAltName=DNS:crm.local,DNS:localhost,IP:127.0.0.1"
+    #   kubectl -n crm create secret tls crm-tls --cert=tls.crt --key=tls.key
+    #
+    # Self-signed, so a browser will refuse it. That proves TLS terminates, not
+    # that anything stands behind it. A certificate anyone accepts needs a domain
+    # name and cert-manager.
+    secretName: crm-tls
+
+# --------------------------------------------------------------- scheduling ----
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

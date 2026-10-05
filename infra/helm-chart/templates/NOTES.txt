@@ -1,0 +1,112 @@
+{{- /*
+NOTES.txt, printed by helm install and helm upgrade.
+
+The purpose here is to print the two or three things that will go wrong next, in
+the order they will go wrong, rather than a list of every object created. An
+install that ends with eleven paragraphs of kind/name does not get read, and the
+one line that matters is the one buried in the middle.
+*/ -}}
+{{- $fullName := include "crm.fullname" . -}}
+{{- $svcCount := len .Values.backendServices -}}
+
+  {{ .Chart.Name }} {{ .Chart.Version }} installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+  Workloads: {{ .Values.serviceDiscovery.replicas }} service-discovery,
+  {{ $svcCount }} backend services, {{ .Values.gateway.replicas }} {{ .Values.gateway.name }},
+  {{ .Values.frontend.replicas }} {{ .Values.frontend.name }}.
+  Images: {{ .Values.global.imageRegistry }}/...:{{ .Values.global.imageTag }}
+
+{{- if not .Values.secrets.create }}
+
+1. The Secret {{ .Values.secrets.name }} is NOT created by this chart, on purpose.
+
+   Every pod below will stay Pending until it exists. Nothing is wrong; this is
+   the expected state until you run:
+
+     kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.secrets.name }} \
+       --from-literal=jwt-secret-key="$(openssl rand -base64 32)" \
+       --from-literal=db-username=user-service \
+       --from-literal=db-password='...' \
+       --from-literal=mysql-root-password='...' \
+       --from-literal=mysql-database=authdb \
+       --from-literal=mysql-user=user-service \
+       --from-literal=mysql-password='...' \
+       --from-literal=mail-username='...' \
+       --from-literal=mail-password='...'
+
+   Set secrets.create=true in values only for a throwaway lab. A Secret rendered
+   by Helm is stored base64-encoded in the release object in the cluster, so
+   anyone who can read releases can read these, and --debug prints them to your
+   terminal.
+{{- end }}
+
+{{- if .Values.mysql.enabled }}
+{{- if not .Values.mysql.persistence.enabled }}
+
+   WARNING: mysql.persistence is disabled{{ if .Values.mysql.persistence.allowEmptyDir }} and allowEmptyDir is true, so the database lives in an emptyDir{{ end }}.
+   The data is lost every time the pod is replaced. Acceptable for a first run,
+   not for anything you care about.
+{{- else }}
+   MySQL keeps its data in a {{ .Values.mysql.persistence.size }} claim{{ if .Values.mysql.persistence.storageClass }} on StorageClass {{ .Values.mysql.persistence.storageClass }}{{ else }} on whatever the cluster defaults to{{ end }}.
+
+   If no StorageClass exists the claim stays Pending and MySQL never starts. On a
+   kubeadm cluster there usually is none; check with `kubectl get storageclass`.
+{{- end }}
+{{- if and .Values.mysql.initDatabase (not .Values.secrets.create) (not .Values.mysql.initScripts.grantUser) }}
+
+   The schemas are created by the init script, but the GRANT statements are not:
+   mysql.initScripts.grantUser is empty and secrets.create is false, so the chart
+   does not know the database account name. The MySQL image grants its account on
+   one schema only, so services pointing at another schema will get "access
+   denied" and it will look like a password problem.
+
+   Fix it either by setting secrets.create=true, or by running once as root:
+
+     GRANT ALL PRIVILEGES ON `candidate`.* TO 'user-service'@'%';
+     GRANT ALL PRIVILEGES ON `task`.*      TO 'user-service'@'%';
+     GRANT ALL PRIVILEGES ON `event_system`.* TO 'user-service'@'%';
+     FLUSH PRIVILEGES;
+
+   The init directory only runs on an empty data directory, so setting
+   grantUser afterwards means `kubectl exec` into MySQL, not a restart.
+{{- end }}
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.tls.enabled }}
+
+2. TLS references the Secret {{ .Values.ingress.tls.secretName }}, which this chart does not create.
+
+     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+       -keyout tls.key -out tls.crt -subj "/CN={{ .Values.ingress.host }}" \
+       -addext "subjectAltName=DNS:{{ .Values.ingress.host }},DNS:localhost,IP:127.0.0.1"
+     kubectl -n {{ .Release.Namespace }} create secret tls {{ .Values.ingress.tls.secretName }} --cert=tls.crt --key=tls.key
+
+   Without it the ingress controller serves over plain HTTP and `kubectl get
+   ingress` still reports the rule, so the downgrade is invisible from the
+   cluster side. Self-signed also means browsers refuse it, which is the correct
+   behaviour: this proves TLS terminates, not that anything stands behind it.
+
+   Then add the host to your machine:
+
+     echo "{{ .Values.ingress.host }}" | sudo tee -a /etc/hosts
+{{- end }}
+
+   Reach the application at {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+   /api goes to {{ .Values.gateway.name }}, everything else to {{ .Values.frontend.name }}.
+{{- end }}
+
+   Watch it come up:
+
+     kubectl -n {{ .Release.Namespace }} get pods -w
+     kubectl -n {{ .Release.Namespace }} get ingress
+{{- if .Values.global.imagePullSecret }}
+
+   Pulling from {{ .Values.global.imageRegistry }} needs a pull secret named
+   {{ .Values.global.imagePullSecret }} in this namespace. The chart references it
+   but cannot create it, because an imagePullSecret holds a registry password.
+{{- end }}
+
+   Check the registry routes the gateway claims to implement:
+
+     kubectl -n {{ .Release.Namespace }} get deploy {{ .Values.gateway.name }} -o jsonpath='{.metadata.annotations.crm\.devops/routes}'

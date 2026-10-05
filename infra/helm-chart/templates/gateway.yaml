@@ -1,0 +1,75 @@
+{{- /*
+The gateway: the single door into the backend.
+
+Separate from backendServices because it has no database and no datasource
+environment variables, and because its routes are worth stating where someone
+reading the Deployment can see them. The routes are baked into the image rather
+than configured here, so the list below is documentation. It is not decoration:
+the four event routes were missing until a branch added them, and a list that
+someone can read is how the next missing one gets caught.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.gateway.name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "crm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.gateway.name }}
+  ports:
+    - name: http
+      port: {{ .Values.gateway.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.gateway.name }}
+  annotations:
+    # Readable from `kubectl describe` without running the image or opening the
+    # repository. Rendered as data rather than a comment so it survives.
+    crm.devops/routes: {{ join "," .Values.gateway.routes | quote }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "crm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.gateway.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "crm.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.gateway.name }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "crm.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: {{ .Values.gateway.name }}
+          image: {{ include "crm.image" (dict "root" . "name" .Values.gateway.name) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+          env:
+            {{- if .Values.gateway.springProfile }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.gateway.springProfile | quote }}
+            {{- end }}
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://{{ .Values.serviceDiscovery.name }}:{{ .Values.serviceDiscovery.port }}/eureka/"
+          {{- include "crm.backendProbes" (dict "port" "http" "readiness" (dict "initialDelaySeconds" 40 "periodSeconds" 10) "liveness" (dict "initialDelaySeconds" 90 "periodSeconds" 20)) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+      {{- include "crm.scheduling" . | nindent 6 }}

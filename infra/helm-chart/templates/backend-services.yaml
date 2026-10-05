@@ -1,0 +1,111 @@
+{{- /*
+The five business services, rendered by one range over a map keyed by name.
+
+Keyed by name rather than a list because of how Helm merges overrides: maps merge
+key by key, lists merge element by element. A list would mean an environment
+overriding `replicas` had to restate the whole list at the same indexes, and
+adding a sixth service here would silently shift every override onto the wrong
+service. The name is the map key, so it cannot drift from the key it is looked up
+under.
+This file is the reason to have a chart at all. In the plain manifests each of
+these is a near copy of the last, and a change to a probe delay or an environment
+variable means five edits, of which four will be forgotten. Here a service is an
+entry in values.yaml, and adding a seventh means adding an entry rather than a
+file.
+
+The environment variables come from the values list through the crm.serviceEnv
+helper, which has three branches and no fourth: a literal value, a ConfigMap key,
+or a Secret key. There is no way to write a credential inline in values.yaml and
+have it reach a pod as a literal, because the template has no branch that would
+produce one. That is the separation this chart is actually buying.
+*/ -}}
+{{- range $name, $svc := .Values.backendServices }}
+{{- /*
+  Resolved through `| default dict` rather than read directly. A service that
+  declares no probes would make `$svc.probes.readiness` a nil pointer evaluation
+  and fail the whole render, and a per-service optional block that takes the
+  install down with it is not optional.
+*/}}
+{{- $probes := $svc.probes | default dict }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "crm.namespace" $ }}
+  labels:
+    {{- include "crm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "crm.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "crm.namespace" $ }}
+  labels:
+    {{- include "crm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $svc.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "crm.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- include "crm.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $name }}
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "crm.imagePullSecrets" $ | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "crm.image" (dict "root" $ "name" $name) | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          env:
+            {{- if $svc.springProfile }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ $svc.springProfile | quote }}
+            {{- end }}
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://{{ $.Values.serviceDiscovery.name }}:{{ $.Values.serviceDiscovery.port }}/eureka/"
+            {{- include "crm.serviceEnv" (dict "root" $ "service" $svc) | nindent 12 }}
+          {{- include "crm.backendProbes" (dict "port" "http" "readiness" ($probes.readiness | default (dict "initialDelaySeconds" 40 "periodSeconds" 10)) "liveness" ($probes.liveness | default (dict "initialDelaySeconds" 90 "periodSeconds" 20))) | nindent 10 }}
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "200m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "1Gi")) $svc.resources) | nindent 12 }}
+          {{- with $svc.emptyDirs }}
+          volumeMounts:
+            {{- range . }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          {{- end }}
+      {{- with $svc.emptyDirs }}
+      # emptyDir rather than a claim: these belong to a pod, and two replicas
+      # cannot share a ReadWriteOnce volume. A file written by one replica is
+      # invisible to the other, which is why the replicas default to 1 for the
+      # services that declare these.
+      volumes:
+        {{- range . }}
+        - name: {{ .name }}
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+      {{- include "crm.scheduling" $ | nindent 6 }}
+{{- end }}

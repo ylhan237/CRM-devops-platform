@@ -1,0 +1,61 @@
+# A second environment, to show what actually changes.
+#
+#   helm install crm-dev ../helm-chart -f examples/dev-values.yaml
+#
+# This file exists because values.yaml claims that two environments means two
+# values files. A claim like that is worth nothing without the file that proves
+# it, so here it is, and it is short on purpose: a values override that needs
+# thirty lines is a second chart nobody maintains.
+#
+# Note what is NOT here. No port, no environment variable, no datasource URL. A
+# map key overrides one branch of the tree and leaves the rest alone, so an
+# override is six numbers rather than a copy of the defaults.
+
+# Pinned rather than `latest`. In development the point is to know which commit
+# is running; `latest` on a branch means a pod restarts into something new
+# without anybody asking for it.
+global:
+  imageTag: "0.1.0-dev"
+
+# One replica everywhere. A development cluster has the memory for one, and two
+# replicas of auth-service means the uploads written by one are invisible to the
+# other, which is confusing rather than useful while developing.
+serviceDiscovery:
+  replicas: 1
+
+backendServices:
+  auth-service:
+    replicas: 1
+  student-service:
+    replicas: 1
+  task-service:
+    replicas: 1
+  notification-service:
+    replicas: 1
+  event-service:
+    replicas: 1
+
+gateway:
+  replicas: 1
+
+frontend:
+  replicas: 1
+
+mysql:
+  # The point of a development environment: the data is disposable, so the claim
+  # is not. No provisioner has to be installed to get something running.
+  persistence:
+    enabled: false
+    allowEmptyDir: true
+
+# Plain HTTP. TLS in development is a browser warning on every reload, which
+# teaches people to click through warnings.
+ingress:
+  tls:
+    enabled: false
+
+# The links in the emails point at the dev host, which is what makes the
+# activation and reset mails actually work here.
+config:
+  activationUrl: "http://crm.localhost/login"
+  resetPasswordUrl: "http://crm.localhost/forget-password"

@@ -1,0 +1,83 @@
+{{- /*
+One address for the whole application.
+
+Everything under /api goes to the gateway, which is the only backend entry point,
+and everything else to the frontend. The /api rule is written first so the intent
+reads top to bottom. The ingress controller would prefer the longest matching path
+either way, so the order is for the reader rather than for the routing, and saying
+so is better than letting the next person believe it is load-bearing.
+
+On `requireExisting`: when it is false and the TLS Secret is absent, the ingress
+controller serves the route over plain HTTP without saying so in `kubectl get
+ingress`, and the browser falls back to http://. That is a silent downgrade of the
+transport, so the chart can be told to refuse instead. It cannot check the Secret
+itself, being a template, so this is a promise the operator makes rather than a
+check the chart performs. That limitation is stated here rather than implied.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "crm.fullname" . }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+  {{- /*
+  One annotations block, merged on purpose. A second `annotations:` key in the
+  same mapping is a duplicate key: some YAML parsers take the last one and drop
+  the nginx settings, and some refuse to parse it. Neither failure names the
+  cause, so the ingress comes up with a 1 MiB body limit and no error anywhere.
+*/}}
+  {{- $annotations := dict }}
+  {{- with .Values.podAnnotations }}
+  {{- $annotations = merge (dict) . $annotations }}
+  {{- end }}
+  {{- if .Values.ingress.proxyBodySize }}
+  {{- /*
+    Built as a dict first, then merged. `merge` takes a destination and a list of
+    maps to copy into it; passing key and value as separate arguments, which reads
+    as if it should work, fails with a type error naming a map.
+  */}}
+  {{- $nginx := dict
+        "nginx.ingress.kubernetes.io/proxy-body-size" (.Values.ingress.proxyBodySize | toString)
+        "nginx.ingress.kubernetes.io/proxy-read-timeout" (.Values.ingress.proxyReadTimeout | toString)
+        "nginx.ingress.kubernetes.io/proxy-send-timeout" (.Values.ingress.proxySendTimeout | toString) }}
+  {{- $annotations = merge (dict) $nginx $annotations }}
+  {{- end }}
+  {{- if $annotations }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.gateway.name }}
+                port:
+                  number: {{ .Values.gateway.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.frontend.name }}
+                port:
+                  number: {{ .Values.frontend.port }}
+{{- /*
+  requireExisting is not checked here. Helm renders text; it cannot read the
+  cluster, so there is nothing to check against. NOTES.txt prints the command to
+  run and what to do when it fails, which is the honest amount of help a template
+  can give.
+*/ -}}
+{{- end }}

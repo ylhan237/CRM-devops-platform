@@ -1,0 +1,24 @@
+{{- /*
+The non-secret configuration.
+
+Everything here is an address, a port or a URL. The rule the whole chart follows
+is that a credential has no code path into a ConfigMap: a service declares
+`secretKey` and the template can only produce a secretKeyRef. That is why
+separating the two is done in the template and not only in the comments.
+
+`public-host` is not here even though it could be: nothing reads it. The host
+lives in the Ingress where it is used, and a ConfigMap key no pod consumes is a
+comment that goes stale.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.config.name | default (printf "%s-config" (include "crm.fullname" .)) }}
+  namespace: {{ include "crm.namespace" . }}
+  labels:
+    {{- include "crm.labels" . | nindent 4 }}
+data:
+  activation-url: {{ .Values.config.activationUrl | quote }}
+  reset-password-url: {{ .Values.config.resetPasswordUrl | quote }}
+  mail-host: {{ .Values.config.mailHost | quote }}
+  mail-port: {{ .Values.config.mailPort | quote }}
