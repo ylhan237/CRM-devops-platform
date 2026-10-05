@@ -93,32 +93,45 @@ jobs:
       # One image at a time per runner. The eight images are independent, and a
       # failure then names the image that failed rather than one number for all.
       fail-fast: false
+      # `context` is the directory sent to the daemon, and `dockerfile` is resolved
+      # **relative to the workspace root**, not relative to the context.
+      #
+      # The two being different places is what produced the next failure:
+      #
+      #   ERROR: failed to build: resolve : lstat Event_Management_System:
+      #   no such file or directory
+      #
+      # The context correctly is ./CRM_Backend so the shared build-tools parent POM
+      # is reachable, and the Dockerfile paths were still written relative to it, the
+      # way docker-compose wants them. Compose resolves both against the compose file;
+      # build-push-action does not. The paths below are therefore workspace-relative
+      # and must stay that way when a service is added.
       matrix:
         include:
           - image: service-discovery
             context: ./CRM_Backend
-            dockerfile: service-discovery/Dockerfile
+            dockerfile: CRM_Backend/service-discovery/Dockerfile
           - image: auth-service
             context: ./CRM_Backend
-            dockerfile: auth-service/Dockerfile
+            dockerfile: CRM_Backend/auth-service/Dockerfile
           - image: student-service
             context: ./CRM_Backend
-            dockerfile: Student_Management_Service/Dockerfile
+            dockerfile: CRM_Backend/Student_Management_Service/Dockerfile
           - image: task-service
             context: ./CRM_Backend
-            dockerfile: Task_Management_Service/Dockerfile
+            dockerfile: CRM_Backend/Task_Management_Service/Dockerfile
           - image: notification-service
             context: ./CRM_Backend
-            dockerfile: Notification_Service/Dockerfile
+            dockerfile: CRM_Backend/Notification_Service/Dockerfile
           - image: event-service
             context: ./CRM_Backend
-            dockerfile: Event_Management_System/Dockerfile
+            dockerfile: CRM_Backend/Event_Management_System/Dockerfile
           - image: api-gateway
             context: ./CRM_Backend
-            dockerfile: api-gateway/Dockerfile
+            dockerfile: CRM_Backend/api-gateway/Dockerfile
           - image: frontend
             context: ./Front/CRM
-            dockerfile: Dockerfile
+            dockerfile: Front/CRM/Dockerfile
 
     steps:
       - uses: actions/checkout@v7
@@ -139,7 +152,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}
+          images: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}
           # No enable= on the first rule: the resolver guarantees there is always a
           # tag, so there is nothing to condition on. The only remaining enable is
           # latest, and it is a real boolean comparison rather than the result of
@@ -176,7 +189,7 @@ jobs:
             echo "### ${{ matrix.image }}"
             echo ""
             echo '```'
-            echo "${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}"
+            echo "${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -195,7 +208,7 @@ jobs:
 
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          image-ref: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
           format: sarif
           output: trivy-${{ matrix.image }}.sarif
           severity: CRITICAL,HIGH
@@ -215,7 +228,7 @@ jobs:
       - name: Software bill of materials
         uses: anchore/sbom-action@v0.24.3
         with:
-          image: ${{ env.REGISTRY_GCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+          image: ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
           format: spdx-json
           output-file: sbom-${{ matrix.image }}.spdx.json
         continue-on-error: true

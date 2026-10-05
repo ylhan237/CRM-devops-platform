@@ -81,7 +81,7 @@ jobs:
           done
           exit $status
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -89,12 +89,23 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: Front/CRM
-        # `npm ci` is what this should use, and is what it used to. It is
-        # bypassed here because package-lock.json has not been regenerated since
-        # eslint and prettier were added to package.json, and the machine this
-        # was written on could not complete an npm install. This line must go
-        # back to `npm ci --no-audit` as soon as the lockfile is refreshed.
-        run: npm install --no-audit --no-fund
+        # `npm ci`, and again here.
+        #
+        # It was bypassed with `npm install` because package-lock.json had not been
+        # regenerated since eslint and prettier were added to package.json, and a full
+        # npm install could not complete on the machine this was written on. That is
+        # why the release builds were failing while CI was green: the workflow
+        # worked around the desync and the Dockerfile could not.
+        #
+        # `npm install --package-lock-only` refreshes the lockfile from package.json
+        # without downloading anything into node_modules, and it did it in 28 seconds
+        # against the 40-plus minutes a full install had been taking. `npm ci --dry-run`
+        # then passes, which is what a desynced lockfile would refuse.
+        #
+        # `npm ci` and not `npm install`, because npm ci installs exactly what the
+        # lockfile says and fails when the two disagree. That failure is the check
+        # this step exists to run.
+        run: npm ci --no-audit --no-fund
 
       - name: ESLint
         working-directory: Front/CRM
@@ -155,7 +166,7 @@ jobs:
           done
           exit $status
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -163,7 +174,9 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: Front/CRM
-        run: npm install --no-audit --no-fund
+        # Same reason as the lint job, and the same lockfile. Commented once, in
+        # the first occurrence, so this is not repeated here.
+        run: npm ci --no-audit --no-fund
 
       - name: Frontend specs
         working-directory: Front/CRM
@@ -272,7 +285,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 

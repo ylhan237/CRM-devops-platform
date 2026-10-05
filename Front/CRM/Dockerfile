@@ -2,7 +2,7 @@
 FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --quiet
+RUN npm ci --no-audit --no-fund --quiet
 COPY . .
 RUN npm run build -- --configuration production
 

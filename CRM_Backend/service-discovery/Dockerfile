@@ -9,7 +9,9 @@ COPY service-discovery/src ./src
 RUN mvn clean package -DskipTests -q
 
 # Stage 2: Run
-FROM --platform=$TARGETPLATFORM eclipse-temurin:17-jre-alpine
+# Alpine would be smaller by about 100 MB and is amd64-only, which
+# no multi-platform build can use: every temurin alpine tag is amd64 only.
+FROM --platform=$TARGETPLATFORM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /app/target/service-discovery-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8761
