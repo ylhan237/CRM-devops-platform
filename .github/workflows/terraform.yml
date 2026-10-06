@@ -342,18 +342,21 @@ jobs:
             echo "Created the container ${CONTAINER}."
           fi
 
-          # Creating the container above is a control-plane operation, so it proves the
-          # principal may manage the account and says nothing about the data plane.
-          # The backend reads and writes blobs, and without a blob role it fails at
+          # The container above may already have existed, which means creating it
+          # proved nothing: an existing container was never created by this run. That
+          # distinction matters here, because the management plane and the data plane
+          # are separate and a permission on one says nothing about the other. The
+          # backend reads and writes blobs, and without a data-plane role it fails at
           # init while listing the workspaces it already knows about:
           #
           #   Failed to get existing workspaces: listing blobs: ... 403
           #   AuthorizationPermissionMismatch
           #
-          # Scoped to the container rather than the account, so the grant cannot reach
-          # anything else in the account. Contributor rather than Reader because the
-          # apply is what writes the state; Reader would let the plan read a state it
-          # could never update.
+          # A grant inherited from the resource group or the storage account covers
+          # the container just as well, so both are checked before failing.
+          #
+          # Contributor rather than Reader because the apply is what writes the state:
+          # Reader would let the plan read a state it could never update.
           subscription_id="$(az account show --query id --output tsv)"
           principal_id="$(az account show --query user.name --output tsv)"
           container_scope="/subscriptions/${subscription_id}/resourceGroups/${RG}/providers/Microsoft.Storage/storageAccounts/${ACCOUNT}/blobServices/default/containers/${CONTAINER}"
@@ -370,20 +373,65 @@ jobs:
           fi
 
           echo "Granting the pipeline principal Storage Blob Data Contributor on ${CONTAINER}..."
-          if ! az role assignment create \
+          granted=false
+          if az role assignment create \
                --assignee-object-id "${principal_id}" \
                --assignee-principal-type ServicePrincipal \
                --role "Storage Blob Data Contributor" \
                --scope "${container_scope}" \
                --output none; then
+            granted=true
+            echo "The role assignment is in place."
+          else
+            # The pipeline principal usually cannot grant itself a role. On a
+            # subscription where it holds only Reader, roleAssignments/write is
+            # denied, and the operator has to make the grant by hand. That is a
+            # one-off, so before failing, check whether a grant already covers this.
+            #
+            # Listed at the container scope with inherited included, not at the
+            # account scope: an assignment made directly on the container is *below*
+            # the account, so listing the account would miss exactly the case this
+            # check exists to catch. Inherited covers the account, the group and the
+            # subscription.
+            echo "The pipeline principal cannot create the role assignment itself."
+            echo "Checking whether an existing grant already covers the container..."
+            existing_roles="$(az role assignment list \
+              --assignee "${principal_id}" \
+              --scope "${container_scope}" \
+              --include-inherited \
+              --query "[].roleDefinitionName" \
+              --output tsv 2>/dev/null || true)"
+            if printf '%s\n' "${existing_roles}" | grep -Eq '^(Owner|Storage Blob Data Owner|Storage Blob Data Contributor)$'; then
+              granted=true
+              echo "An existing grant covers it: $(printf '%s\n' "${existing_roles}" | tr '\n' ' ')"
+              echo "No new assignment needed."
+            fi
+          fi
+
+          if [ "${granted}" != "true" ]; then
             echo ""
-            echo "::error::Could not grant Storage Blob Data Contributor on ${CONTAINER}."
-            echo "Creating a role assignment needs Microsoft.Authorization/roleAssignments/write"
-            echo "on the scope, which Contributor and Owner carry and Reader does not. The"
-            echo "backend has to write state, so there is no way around the role."
+            echo "::error::The pipeline principal cannot read or write blobs in ${CONTAINER},"
+            echo "and cannot grant itself the role that would let it. This needs one command"
+            echo "run once, from an account that is Owner on the subscription:"
+            echo ""
+            echo "  az role assignment create \\"
+            echo "    --assignee ${principal_id} \\"
+            echo "    --role \"Storage Blob Data Contributor\" \\"
+            echo "    --scope \"${container_scope}\""
+            echo ""
+            echo "Or, to give it the management rights the pipeline also needs later,"
+            echo "grant Contributor on the state resource group instead:"
+            echo ""
+            echo "  az role assignment create \\"
+            echo "    --assignee ${principal_id} \\"
+            echo "    --role Contributor \\"
+            echo "    --scope \"/subscriptions/${subscription_id}/resourceGroups/${RG}\""
+            echo ""
+            echo "Creating a role assignment needs Microsoft.Authorization/roleAssignments/write,"
+            echo "which Contributor and Owner carry and Reader does not. The backend has to"
+            echo "write state, so there is no way to work around the role."
             exit 1
           fi
-          echo "The role assignment is in place."
 
           # A role assignment is not effective the moment Azure accepts it: it takes a
           # while to reach the data plane. The plan job starts seconds later and would
@@ -407,9 +455,9 @@ jobs:
           if [ "${blobs_ready}" != "true" ]; then
             echo ""
             echo "::error::The pipeline principal still cannot read blobs in ${CONTAINER} after 5 minutes."
-            echo "The assignment exists, so this is propagation rather than a missing grant."
-            echo "Confirm what the principal actually holds:"
-            echo "  az role assignment list --assignee ${principal_id} --scope \"${container_scope}\""
+            echo "A grant exists, so this is propagation rather than a missing role. If it does"
+            echo "not clear, check what the principal holds:"
+            echo "  az role assignment list --assignee ${principal_id} --include-inherited --scope \"${container_scope}\""
             exit 1
           fi
 
