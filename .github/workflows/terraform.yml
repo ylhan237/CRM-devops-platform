@@ -265,6 +265,7 @@ jobs:
           ACCOUNT: ${{ env.STATE_STORAGE_ACCOUNT }}
           CONTAINER: ${{ env.STATE_CONTAINER }}
           LOCATION: ${{ steps.region.outputs.location }}
+          CREATED: ${{ steps.check.outputs.created }}
         run: |
           set -euo pipefail
 
@@ -341,6 +342,77 @@ jobs:
             echo "Created the container ${CONTAINER}."
           fi
 
+          # Creating the container above is a control-plane operation, so it proves the
+          # principal may manage the account and says nothing about the data plane.
+          # The backend reads and writes blobs, and without a blob role it fails at
+          # init while listing the workspaces it already knows about:
+          #
+          #   Failed to get existing workspaces: listing blobs: ... 403
+          #   AuthorizationPermissionMismatch
+          #
+          # Scoped to the container rather than the account, so the grant cannot reach
+          # anything else in the account. Contributor rather than Reader because the
+          # apply is what writes the state; Reader would let the plan read a state it
+          # could never update.
+          subscription_id="$(az account show --query id --output tsv)"
+          principal_id="$(az account show --query user.name --output tsv)"
+          container_scope="/subscriptions/${subscription_id}/resourceGroups/${RG}/providers/Microsoft.Storage/storageAccounts/${ACCOUNT}/blobServices/default/containers/${CONTAINER}"
+
+          # az account show reports the object id of the signed-in service principal,
+          # which is not the client id. Checked rather than assumed: a scope built
+          # around the wrong id produces an assignment that silently grants nothing,
+          # and the 403 that follows points at the wrong thing entirely.
+          if ! printf '%s' "${principal_id}" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+            echo "::error::The signed-in principal id is not a UUID. Found: '${principal_id}'."
+            echo "The state role cannot be granted to that. Check that azure/login signed in"
+            echo "as a service principal and not as a user or a managed identity."
+            exit 1
+          fi
+
+          echo "Granting the pipeline principal Storage Blob Data Contributor on ${CONTAINER}..."
+          if ! az role assignment create \
+               --assignee-object-id "${principal_id}" \
+               --assignee-principal-type ServicePrincipal \
+               --role "Storage Blob Data Contributor" \
+               --scope "${container_scope}" \
+               --output none; then
+            echo ""
+            echo "::error::Could not grant Storage Blob Data Contributor on ${CONTAINER}."
+            echo "Creating a role assignment needs Microsoft.Authorization/roleAssignments/write"
+            echo "on the scope, which Contributor and Owner carry and Reader does not. The"
+            echo "backend has to write state, so there is no way around the role."
+            exit 1
+          fi
+          echo "The role assignment is in place."
+
+          # A role assignment is not effective the moment Azure accepts it: it takes a
+          # while to reach the data plane. The plan job starts seconds later and would
+          # meet the 403 above, so the wait belongs here, where the message can say
+          # what is happening instead of leaving a bare status code.
+          blobs_ready=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if az storage blob list \
+                 --account-name "${ACCOUNT}" \
+                 --container-name "${CONTAINER}" \
+                 --auth-mode login \
+                 --output none >/dev/null 2>&1; then
+              echo "The principal can list blobs after ${attempt} attempt(s)."
+              blobs_ready=true
+              break
+            fi
+            echo "The role assignment is not effective yet (${attempt}/10). Waiting 30s..."
+            sleep 30
+          done
+
+          if [ "${blobs_ready}" != "true" ]; then
+            echo ""
+            echo "::error::The pipeline principal still cannot read blobs in ${CONTAINER} after 5 minutes."
+            echo "The assignment exists, so this is propagation rather than a missing grant."
+            echo "Confirm what the principal actually holds:"
+            echo "  az role assignment list --assignee ${principal_id} --scope \"${container_scope}\""
+            exit 1
+          fi
+
           # Computed before the summary rather than inside it. A command substitution
           # wrapping a double-quoted string, inside a double-quoted echo, is quoting
           # that works until it does not, and a broken summary is not worth the
@@ -358,7 +430,8 @@ jobs:
             echo "| storage account | \`${ACCOUNT}\` |"
             echo "| storage account region | \`${account_location}\` |"
             echo "| container | \`${CONTAINER}\` |"
-            echo "| created now | ${ACCOUNT} |"
+            echo "| account created now | \`${CREATED}\` |"
+            echo "| blob role | \`Storage Blob Data Contributor\` on the container |"
             echo ""
             echo "The Terraform state lives here from this run onwards. Public access is"
             echo "off and TLS 1.2 is the floor."
