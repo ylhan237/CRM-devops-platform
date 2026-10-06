@@ -83,9 +83,29 @@ Ce qui se passe ensuite :
 | Job | Rôle |
 |---|---|
 | `check` | `fmt` et `validate` avec les mêmes credentials que sur PR |
-| `bootstrap` | crée le compte de stockage qui portera l'état, s'il n'existe pas |
+| `bootstrap` | crée le compte de stockage qui portera l'état, s'il n'existe pas, et accorde au principal de service le rôle `Storage Blob Data Contributor` sur le conteneur d'état |
 | `plan` | planifie **contre l'état réel** et enregistre le plan |
 | `apply` | **attend une approbation**, puis applique le plan enregistré |
+
+Le rôle sur les blobs est nécessaire et distinct des droits ARM. Créer le compte
+et le conteneur passe avec un simple `Contributor`, parce que ce sont des opérations
+de plan de gestion. Le backend `azurerm`, lui, lit et écrit des blobs, et répond sans
+ce rôle :
+
+```
+Failed to get existing workspaces: listing blobs: ... 403
+AuthorizationPermissionMismatch
+```
+
+C'est pourquoi `bootstrap` l'accorde. Il attend ensuite que l'attribution soit
+effective sur le plan de données, ce qui peut prendre une minute : Azure accepte
+l'attribution avant qu'elle ne s'applique, et le job `plan` démarrerait sinon sur le
+403 ci-dessus.
+
+**Conséquence pour le compte de service :** il faut `Contributor` ou `Owner` sur le
+groupe de ressources d'état. `Reader` ne suffit pas, car créer une attribution de
+rôle demande `Microsoft.Authorization/roleAssignments/write`. `bootstrap` échoue
+avec un message explicite si ce n'est pas le cas.
 
 Le job `apply` utilise `terraform apply tfplan`, pas `terraform apply`. C'est la
 différence entre appliquer le plan qui a été approuvé et replanifier au moment de
